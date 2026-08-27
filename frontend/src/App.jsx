@@ -19,7 +19,7 @@ function AppShell() {
   return (
     <div className="app-shell">
       <nav className="sidebar">
-        <h1 className="brand">SIEM-lite</h1>
+        <h1 className="brand">SIEM-HUB</h1>
         <NavLink to="/" end className="nav-link">Dashboard</NavLink>
         <NavLink to="/alerts" className="nav-link">Alerts</NavLink>
         <NavLink to="/logs" className="nav-link">Logs</NavLink>

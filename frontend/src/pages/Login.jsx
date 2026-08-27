@@ -29,7 +29,7 @@ export default function Login() {
   return (
     <div className="auth-shell">
       <form className="auth-card" onSubmit={handleSubmit}>
-        <h1 className="brand">SIEM-lite</h1>
+        <h1 className="brand">SIEM-HUB</h1>
         <p className="auth-subtitle">
           {mode === "login" ? "Sign in to your dashboard" : "Create an account"}
         </p>
