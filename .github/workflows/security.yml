@@ -1,0 +1,86 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Catch newly-disclosed CVEs in already-committed dependencies, not just
+    # ones introduced by a new push.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  python-security:
+    name: Backend (bandit + pip-audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install scanners
+        run: pip install bandit pip-audit
+
+      - name: Dependency vulnerabilities (pip-audit)
+        run: python -m pip_audit -r requirements.txt
+
+      - name: Static analysis (bandit)
+        run: python -m bandit -r app config.py run.py seed.py -ll
+
+  frontend-security:
+    name: Frontend (npm audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Dependency vulnerabilities (npm audit)
+        # KNOWN, ACCEPTED BASELINE (as of 2026-08-27) pending a breaking-change
+        # upgrade — tracked as a follow-up, not silently ignored:
+        #   - react-router / react-router-dom: GHSA-wrjc-x8rr-h8h6, GHSA-337j-9hxr-rhxg
+        #     (fix requires react-router-dom >= 7.18, a major bump)
+        #   - esbuild/vite dev-server request-forwarding: GHSA-67mh-4wv8-2f99
+        #     (fix requires vite >= 7, a major bump)
+        # continue-on-error keeps this from blocking merges on the known
+        # baseline above. Remove it once those upgrades land so this job
+        # gates new vulnerabilities like the backend one does.
+        run: npm audit --audit-level=high
+        continue-on-error: true

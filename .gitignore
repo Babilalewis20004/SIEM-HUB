@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+backend/venv/
+backend/instance/
+
+# Secrets
+backend/.env
+
+# SQLite databases
+*.db
+
+# Trained ML artifacts (regenerate via POST /api/alerts/train-model)
+backend/app/ml_models/*.joblib
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db
