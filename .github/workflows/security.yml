@@ -73,14 +73,4 @@ jobs:
         run: npm ci
 
       - name: Dependency vulnerabilities (npm audit)
-        # KNOWN, ACCEPTED BASELINE (as of 2026-08-27) pending a breaking-change
-        # upgrade — tracked as a follow-up, not silently ignored:
-        #   - react-router / react-router-dom: GHSA-wrjc-x8rr-h8h6, GHSA-337j-9hxr-rhxg
-        #     (fix requires react-router-dom >= 7.18, a major bump)
-        #   - esbuild/vite dev-server request-forwarding: GHSA-67mh-4wv8-2f99
-        #     (fix requires vite >= 7, a major bump)
-        # continue-on-error keeps this from blocking merges on the known
-        # baseline above. Remove it once those upgrades land so this job
-        # gates new vulnerabilities like the backend one does.
         run: npm audit --audit-level=high
-        continue-on-error: true
