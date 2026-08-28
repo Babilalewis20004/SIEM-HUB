@@ -1,13 +1,13 @@
 """
 Run with: python seed.py
-Creates default detection rules and a handful of sample logs so the
+Creates default detection rules and a handful of sample events so the
 dashboard isn't empty on first run.
 """
 from datetime import datetime, timedelta
 import random
 
 from app import create_app, db
-from app.models import Rule, Log, User
+from app.models import Rule, Event, User
 from app.services.ml_detection import train_model
 
 app = create_app()
@@ -30,7 +30,7 @@ with app.app_context():
             name="brute_force_ssh",
             rule_type="threshold",
             condition={
-                "event_type": "login_failed",
+                "event_type": "authentication_failure",
                 "count": 5,
                 "window_seconds": 60,
                 "group_by": "source_ip",
@@ -43,7 +43,7 @@ with app.app_context():
             name="http_error_burst",
             rule_type="threshold",
             condition={
-                "event_type": "http_request",
+                "category": "web",
                 "count": 20,
                 "window_seconds": 60,
                 "group_by": "source_ip",
@@ -53,37 +53,47 @@ with app.app_context():
 
     db.session.commit()
 
-    # --- Sample logs (only if DB is empty) ---
-    if Log.query.count() == 0:
+    # --- Sample events (only if DB is empty) ---
+    if Event.query.count() == 0:
         now = datetime.utcnow()
         sample_ips = ["203.0.113.5", "198.51.100.23", "10.0.0.15"]
 
         # A brute-force burst from one IP
         for i in range(7):
-            db.session.add(Log(
+            db.session.add(Event(
                 timestamp=now - timedelta(seconds=i * 5),
-                source="auth",
-                host="web01",
+                event_type="authentication_failure",
+                category="authentication",
+                source_type="ssh",
                 source_ip="203.0.113.5",
-                event_type="login_failed",
-                severity="warning",
+                destination_port=22,
+                username="admin",
+                hostname="web01",
+                action="login",
+                outcome="failure",
+                severity="medium",
                 raw_message=f"sshd: Failed password for invalid user admin from 203.0.113.5 port {50000+i} ssh2",
-                parsed_fields={"user": "admin"},
+                parsed_fields={"pid": None, "protocol": "ssh2"},
             ))
 
         # Normal traffic
         for i in range(30):
             ip = random.choice(sample_ips)
             status = random.choice([200, 200, 200, 404, 500])
-            db.session.add(Log(
+            is_error = status >= 400
+            db.session.add(Event(
                 timestamp=now - timedelta(minutes=i),
-                source="nginx",
-                host="web01",
+                event_type="http_error" if is_error else "http_request",
+                category="web",
+                source_type="nginx",
                 source_ip=ip,
-                event_type="http_request",
-                severity="critical" if status >= 500 else ("warning" if status >= 400 else "info"),
+                destination_port=80,
+                hostname="web01",
+                action="request",
+                outcome="failure" if is_error else "success",
+                severity="high" if status >= 500 else ("low" if is_error else "info"),
                 raw_message=f'{ip} - - [{now.strftime("%d/%b/%Y:%H:%M:%S")} +0000] "GET /index HTTP/1.1" {status} 512',
-                parsed_fields={"method": "GET", "path": "/index", "status": status, "size": 512},
+                parsed_fields={"method": "GET", "path": "/index", "status_code": status, "response_bytes": 512},
             ))
 
         # Spread-out "normal" baseline traffic across several hours/IPs so the
@@ -94,16 +104,21 @@ with app.app_context():
             for ip in baseline_ips:
                 for i in range(random.randint(1, 4)):
                     status = random.choice([200, 200, 200, 200, 404])
-                    db.session.add(Log(
+                    is_error = status >= 400
+                    db.session.add(Event(
                         timestamp=ts_base + timedelta(seconds=i * 10),
-                        source="nginx",
-                        host="web01",
+                        event_type="http_error" if is_error else "http_request",
+                        category="web",
+                        source_type="nginx",
                         source_ip=ip,
-                        event_type="http_request",
-                        severity="warning" if status == 404 else "info",
+                        destination_port=80,
+                        hostname="web01",
+                        action="request",
+                        outcome="failure" if is_error else "success",
+                        severity="low" if is_error else "info",
                         raw_message=f"{ip} baseline request {status}",
-                        parsed_fields={"method": "GET", "path": "/home", "status": status,
-                                       "size": random.randint(200, 800)},
+                        parsed_fields={"method": "GET", "path": "/home", "status_code": status,
+                                       "response_bytes": random.randint(200, 800)},
                     ))
 
         db.session.commit()

@@ -22,16 +22,16 @@ export default function Dashboard() {
       <h2>Dashboard</h2>
 
       <div className="stat-grid">
-        <StatCard label="Total Logs" value={summary?.total_logs ?? "—"} />
+        <StatCard label="Total Events" value={summary?.total_events ?? "—"} />
         <StatCard label="Open Alerts" value={summary?.open_alerts ?? "—"} tone="warning" />
         <StatCard
           label="Critical Events"
-          value={summary?.log_severity_counts?.critical ?? 0}
+          value={summary?.events_by_severity?.critical ?? 0}
           tone="critical"
         />
         <StatCard
-          label="Warning Events"
-          value={summary?.log_severity_counts?.warning ?? 0}
+          label="High Severity Events"
+          value={summary?.events_by_severity?.high ?? 0}
           tone="warning"
         />
       </div>
@@ -45,10 +45,28 @@ export default function Dashboard() {
             <YAxis />
             <Tooltip />
             <Line type="monotone" dataKey="total" stroke="#4f8cff" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="warning" stroke="#f5a623" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="medium" stroke="#f5a623" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="high" stroke="#e6493d" strokeWidth={1.5} dot={false} />
             <Line type="monotone" dataKey="critical" stroke="#e6493d" strokeWidth={2} dot={false} />
           </LineChart>
         </ResponsiveContainer>
+      </div>
+
+      <div className="panel">
+        <h3>Events by Category</h3>
+        <table className="data-table">
+          <thead>
+            <tr><th>Category</th><th>Event Count</th></tr>
+          </thead>
+          <tbody>
+            {Object.entries(summary?.events_by_category ?? {}).map(([category, count]) => (
+              <tr key={category}>
+                <td>{category}</td>
+                <td>{count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       <div className="panel">

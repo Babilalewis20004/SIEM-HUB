@@ -1,7 +1,10 @@
 # SIEM-lite
 
-A minimal Log Analyzer / SIEM built with Flask + React. Ingests logs, runs
-rule-based anomaly detection, and visualizes alerts/trends on a dashboard.
+A minimal Log Analyzer / SIEM built with Flask + React. Ingests logs,
+normalises them into a common Event schema, runs rule-based + statistical +
+ML anomaly detection, and visualizes alerts/trends on a dashboard. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full pipeline and the
+`Log` → `Event` migration rationale.
 
 ## Structure
 
@@ -9,20 +12,26 @@ rule-based anomaly detection, and visualizes alerts/trends on a dashboard.
 siem-lite/
 ├── backend/          Flask API
 │   ├── app/
-│   │   ├── models/       Log, Alert, Rule, User (SQLAlchemy)
+│   │   ├── models/       Event (canonical), Log (deprecated alias), Alert, Rule, User
+│   │   ├── parsers/       base.py + ssh.py, nginx.py — format-specific extraction
 │   │   ├── routes/       auth, logs, alerts, stats, rules blueprints
-│   │   ├── services/     detection.py (rule-based) + ml_detection.py (Isolation Forest)
-│   │   ├── ml_models/    persisted trained model (isolation_forest.joblib)
-│   │   └── utils/        auth.py (JWT) + parsers.py — log line parsers (SSH, nginx, generic)
+│   │   ├── services/
+│   │   │   ├── normalization.py   parser output -> normalised Event fields
+│   │   │   ├── validation.py      Event field validation before storage
+│   │   │   ├── detection.py       rule-based + off-hours heuristic
+│   │   │   └── ml_detection.py    Isolation Forest anomaly detection
+│   │   └── ml_models/    persisted trained model (isolation_forest.joblib)
+│   ├── migrations/    Flask-Migrate/Alembic schema history
+│   ├── tests/          pytest suite (models, normalisation, ingestion, detection, ML, API)
 │   ├── config.py
 │   ├── run.py
-│   ├── seed.py        Seeds a default admin user + default rules + sample logs
+│   ├── seed.py        Seeds a default admin user + default rules + sample events
 │   └── requirements.txt
 └── frontend/          React (Vite)
     └── src/
         ├── api/client.js     Axios wrapper for the backend (attaches JWT, handles 401s)
         ├── context/          AuthContext.jsx — login/register/logout state
-        ├── pages/            Login, Dashboard, Alerts, Logs
+        ├── pages/            Login, Dashboard, Alerts, Logs (Log Explorer + event detail)
         └── components/
 ```
 
@@ -60,12 +69,27 @@ cd backend
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-python seed.py        # creates admin user + default rules + sample data
-python run.py          # runs on http://localhost:5000
+flask db upgrade        # applies schema migrations (creates/updates events, alerts, etc.)
+python seed.py           # creates admin user + default rules + sample events
+python run.py             # runs on http://localhost:5000
 ```
+
+Schema is managed by Flask-Migrate (`flask db upgrade`/`flask db migrate`) —
+`db.create_all()` is no longer called automatically on startup except for
+ephemeral test databases (`AUTO_CREATE_DB=true`, set by the pytest config).
+If you're upgrading an existing pre-Event checkout, back up `siem.db`
+first; the migration copies every `logs` row into `events` (same `id`s) and
+does not drop any data.
 
 Detection runs automatically every 30s via APScheduler (configurable in
 `config.py`), or trigger manually: `POST /api/alerts/run-detection`.
+
+### Running tests
+
+```bash
+cd backend
+pytest
+```
 
 ## Frontend setup
 
@@ -77,22 +101,26 @@ npm run dev             # runs on http://localhost:5173, proxies /api to :5000
 
 ## How detection works
 
-Two layers, both in `app/services/detection.py`:
+Both layers, in `app/services/detection.py`, read normalised `Event`
+records only (`source_ip`, `event_type`, `category`, `outcome`,
+`timestamp`) — neither has any SSH- or Nginx-specific logic. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full pipeline.
 
 1. **Threshold rules** — stored in the `rules` table, editable via
-   `/api/rules`. Example: 5+ `login_failed` events from the same
-   `source_ip` within 60s → alert. Add your own via `POST /api/rules`:
+   `/api/rules`. Example: 5+ `authentication_failure` events from the same
+   `source_ip` within 60s → alert. Conditions can filter by `event_type`
+   and/or `category`. Add your own via `POST /api/rules`:
    ```json
    {
      "name": "port_scan",
      "rule_type": "threshold",
-     "condition": {"event_type": "http_request", "count": 30, "window_seconds": 30, "group_by": "source_ip"},
+     "condition": {"category": "web", "count": 30, "window_seconds": 30, "group_by": "source_ip"},
      "severity": "critical"
    }
    ```
-2. **Off-hours heuristic** — built-in example flagging login activity
-   between 00:00–05:00 server time. Swap in a real statistical baseline
-   (rolling average per host) as a next step.
+2. **Off-hours heuristic** — built-in example flagging authentication
+   activity between 00:00–05:00 server time. Swap in a real statistical
+   baseline (rolling average per host) as a next step.
 
 ## ML anomaly detection (Isolation Forest)
 
@@ -104,8 +132,9 @@ instead of only known-bad ones. Lives in `app/services/ml_detection.py`.
    `ML_BUCKET_SECONDS`
 2. Each bucket becomes a 10-feature vector: event count, distinct event
    types, failed logins, HTTP errors, unique paths/users touched, avg
-   response size, off-hours flag, critical/warning counts
-   (`FEATURE_NAMES` in `ml_detection.py`)
+   response size, off-hours flag, and critical+high / medium+low severity
+   counts (`FEATURE_NAMES` in `ml_detection.py`) — computed from `Event`
+   fields (`event_type`, `category`, `outcome`, `severity`, `parsed_fields`)
 3. `train_model()` fits a `StandardScaler` + `IsolationForest` on historical
    buckets and persists both to `app/ml_models/isolation_forest.joblib`
 4. `run_ml_detection_job()` scores recent completed buckets against the
@@ -138,9 +167,18 @@ instead of only known-bad ones. Lives in `app/services/ml_detection.py`.
 
 - `POST /api/logs/upload` — multipart file upload (`file` field), one log
   line per row, or JSON: `{"source": "nginx", "host": "web01", "lines": [...]}`
-- Parsers currently understand SSH failed-login lines and nginx access log
-  format; unmatched lines are stored as `event_type: "unparsed"` so nothing
-  is dropped. Add more patterns in `app/utils/parsers.py`.
+- Pipeline: parse → normalise → validate → store (see
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)). One malformed line never
+  fails the whole batch; the response reports
+  `{total_lines, parsed, normalised, failed, stored}`.
+- Parsers currently understand SSH auth lines (failed + accepted, both
+  syslog and ISO timestamps, IPv4/IPv6) and Nginx combined/common access
+  log format; unmatched lines are stored as `event_type: "unparsed"` so
+  nothing is dropped. Add a new format by writing a parser in
+  `app/parsers/` + a normaliser in `app/services/normalization.py`.
+- `GET /api/logs` supports filtering by `source_type`, `event_type`,
+  `category`, `severity`, `source_ip`, `destination_ip`, `hostname`,
+  `username`, `outcome`, `start`/`end`, and free-text `q`.
 
 ## Next steps to extend
 
@@ -153,4 +191,9 @@ instead of only known-bad ones. Lives in `app/services/ml_detection.py`.
 - Enforce `role` (admin vs analyst) on sensitive routes — e.g. only admins
   can create/delete detection rules; right now any authenticated user can
 - Refresh tokens / shorter-lived access tokens for a production deployment
-- Rate limiting on `/api/auth/login` to slow down credential stuffing
+- Rate limiting on `/api/auth/login` and `/api/logs/upload` to slow down
+  credential stuffing and ingestion abuse — not implemented yet
+- Build out a real `LogSource` entity (which feed/agent submitted an event)
+  on top of the reserved `Event.source_id` column
+- Add more parsers (Windows Event, Apache, syslog, firewall, cloud audit
+  logs) — see `docs/ARCHITECTURE.md` for the extension pattern

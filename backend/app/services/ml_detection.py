@@ -6,8 +6,11 @@ patterns (5 failed logins in 60s), Isolation Forest catches *unknown*
 unusual patterns by learning what "normal" traffic looks like per source_ip
 and flagging feature vectors that don't fit that shape.
 
+Feature engineering reads normalised `Event` records — the ML layer has no
+idea whether a bucket's events came from SSH, Nginx, or any future parser.
+
 Pipeline:
-1. Bucket logs into (source_ip, time_bucket) groups
+1. Bucket events into (source_ip, time_bucket) groups
 2. Turn each bucket into a fixed-size numeric feature vector
 3. train_model()  -> fits StandardScaler + IsolationForest on historical
    buckets, persists both to disk via joblib
@@ -29,7 +32,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
 from app import db
-from app.models import Log, Alert
+from app.models import Event, Alert
 
 FEATURE_NAMES = [
     "total_events",
@@ -46,6 +49,11 @@ FEATURE_NAMES = [
 
 RULE_NAME = "ml_isolation_forest"
 
+# severity values (see app/models/event.py SEVERITY_LEVELS) rolled up into the
+# two coarse buckets the feature vector has historically used.
+_CRITICAL_SEVERITIES = ("critical", "high")
+_WARNING_SEVERITIES = ("medium", "low")
+
 
 # ---------- feature engineering ----------
 
@@ -55,35 +63,35 @@ def _bucket_start(ts: datetime, bucket_seconds: int) -> datetime:
     return datetime.utcfromtimestamp(floored)
 
 
-def _group_logs_by_bucket(logs, bucket_seconds):
+def _group_events_by_bucket(events, bucket_seconds):
     buckets = defaultdict(list)
-    for log in logs:
-        if not log.source_ip:
+    for event in events:
+        if not event.source_ip:
             continue
-        key = (log.source_ip, _bucket_start(log.timestamp, bucket_seconds))
-        buckets[key].append(log)
+        key = (event.source_ip, _bucket_start(event.timestamp, bucket_seconds))
+        buckets[key].append(event)
     return buckets
 
 
-def build_feature_vector(logs_in_bucket):
-    total = len(logs_in_bucket)
-    event_types = {l.event_type for l in logs_in_bucket}
-    failed_logins = sum(1 for l in logs_in_bucket if l.event_type == "login_failed")
+def build_feature_vector(events_in_bucket):
+    total = len(events_in_bucket)
+    event_types = {e.event_type for e in events_in_bucket}
+    failed_logins = sum(1 for e in events_in_bucket if e.event_type == "authentication_failure")
 
-    http_logs = [l for l in logs_in_bucket if l.event_type == "http_request"]
-    http_errors = sum(1 for l in http_logs if (l.parsed_fields or {}).get("status", 0) >= 400)
-    unique_paths = len({(l.parsed_fields or {}).get("path") for l in http_logs if l.parsed_fields})
-    sizes = [(l.parsed_fields or {}).get("size", 0) for l in http_logs if l.parsed_fields]
+    web_events = [e for e in events_in_bucket if e.category == "web"]
+    http_errors = sum(1 for e in web_events if e.outcome == "failure")
+    unique_paths = len({(e.parsed_fields or {}).get("path") for e in web_events if e.parsed_fields})
+    sizes = [(e.parsed_fields or {}).get("response_bytes", 0) for e in web_events if e.parsed_fields]
     avg_size = mean(sizes) if sizes else 0
 
-    login_logs = [l for l in logs_in_bucket if l.event_type == "login_failed"]
-    unique_users = len({(l.parsed_fields or {}).get("user") for l in login_logs if l.parsed_fields})
+    login_events = [e for e in events_in_bucket if e.event_type == "authentication_failure"]
+    unique_users = len({e.username for e in login_events if e.username})
 
-    hour = logs_in_bucket[0].timestamp.hour
+    hour = events_in_bucket[0].timestamp.hour
     is_off_hours = 1 if 0 <= hour < 5 else 0
 
-    critical_count = sum(1 for l in logs_in_bucket if l.severity == "critical")
-    warning_count = sum(1 for l in logs_in_bucket if l.severity == "warning")
+    critical_count = sum(1 for e in events_in_bucket if e.severity in _CRITICAL_SEVERITIES)
+    warning_count = sum(1 for e in events_in_bucket if e.severity in _WARNING_SEVERITIES)
 
     return [
         total, len(event_types), failed_logins, http_errors,
@@ -130,8 +138,8 @@ def train_model(lookback_hours=None):
     contamination = current_app.config["ML_CONTAMINATION"]
 
     since = datetime.utcnow() - timedelta(hours=lookback_hours)
-    logs = Log.query.filter(Log.timestamp >= since).all()
-    buckets = _group_logs_by_bucket(logs, bucket_seconds)
+    events = Event.query.filter(Event.timestamp >= since).all()
+    buckets = _group_events_by_bucket(events, bucket_seconds)
 
     if len(buckets) < min_samples:
         return {
@@ -181,19 +189,19 @@ def run_ml_detection_job():
     lookback_minutes = current_app.config["ML_SCORE_LOOKBACK_MINUTES"]
 
     since = datetime.utcnow() - timedelta(minutes=lookback_minutes)
-    logs = Log.query.filter(Log.timestamp >= since).all()
-    buckets = _group_logs_by_bucket(logs, bucket_seconds)
+    events = Event.query.filter(Event.timestamp >= since).all()
+    buckets = _group_events_by_bucket(events, bucket_seconds)
 
     scored = 0
     created = 0
     now = datetime.utcnow()
 
-    for (ip, bucket_start), group_logs in buckets.items():
+    for (ip, bucket_start), group_events in buckets.items():
         # Skip the bucket that's still filling up — scoring it early invites false positives.
         if bucket_start + timedelta(seconds=bucket_seconds) > now:
             continue
 
-        vector = np.array([build_feature_vector(group_logs)])
+        vector = np.array([build_feature_vector(group_events)])
         vector_scaled = bundle["scaler"].transform(vector)
 
         prediction = bundle["model"].predict(vector_scaled)[0]      # -1 = anomaly, 1 = normal
@@ -214,19 +222,19 @@ def run_ml_detection_job():
 
         severity = "critical" if score < -0.15 else "warning"
         db.session.add(Alert(
-            log_id=group_logs[-1].id,
+            event_id=group_events[-1].id,
             rule_name=RULE_NAME,
             severity=severity,
             description=(
                 f"Isolation Forest flagged unusual activity from {ip}: "
-                f"{len(group_logs)} events in {bucket_seconds}s "
+                f"{len(group_events)} events in {bucket_seconds}s "
                 f"(anomaly score {score:.3f}, lower = more anomalous)"
             ),
             context={
                 "group_key": ip,
                 "bucket": bucket_key,
                 "anomaly_score": round(score, 4),
-                "features": dict(zip(FEATURE_NAMES, build_feature_vector(group_logs))),
+                "features": dict(zip(FEATURE_NAMES, build_feature_vector(group_events))),
             },
         ))
         created += 1

@@ -13,7 +13,7 @@ class Alert(db.Model):
 
     id = db.Column(db.String(36), primary_key=True, default=gen_uuid)
 
-    log_id = db.Column(db.String(36), db.ForeignKey("logs.id"), nullable=True)
+    event_id = db.Column(db.String(36), db.ForeignKey("events.id"), nullable=True)
     rule_name = db.Column(db.String(128), nullable=False, index=True)
 
     severity = db.Column(db.String(16), default="warning", index=True)  # info | warning | critical
@@ -26,10 +26,17 @@ class Alert(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     resolved_at = db.Column(db.DateTime, nullable=True)
 
+    @property
+    def log_id(self):
+        """Deprecated alias for event_id."""
+        return self.event_id
+
     def to_dict(self):
+        event = self.event
         return {
             "id": self.id,
-            "log_id": self.log_id,
+            "event_id": self.event_id,
+            "log_id": self.event_id,  # deprecated alias
             "rule_name": self.rule_name,
             "severity": self.severity,
             "description": self.description,
@@ -37,4 +44,5 @@ class Alert(db.Model):
             "status": self.status,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+            "event": event.to_dict() if event else None,
         }

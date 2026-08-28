@@ -1,10 +1,12 @@
-from flask import Flask
+from flask import Flask, request
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_apscheduler import APScheduler
 from config import Config
 
 db = SQLAlchemy()
+migrate = Migrate()
 scheduler = APScheduler()
 
 
@@ -13,6 +15,7 @@ def create_app(config_class=Config):
     app.config.from_object(config_class)
 
     db.init_app(app)
+    migrate.init_app(app, db)
     CORS(app, resources={r"/api/*": {"origins": app.config.get("CORS_ORIGINS", "*")}})
 
     # Blueprints
@@ -23,13 +26,16 @@ def create_app(config_class=Config):
     from app.routes.rules import rules_bp
     from app.utils.auth import require_auth_before_request
 
-    # Every route except /api/auth/* requires a valid JWT.
-    # Must be attached before the blueprints are registered.
+    # Every route except /api/auth/* requires a valid JWT. Registered on the
+    # app (not the blueprint objects, which are module-level singletons and
+    # would blow up on Blueprint.before_request() the second time create_app()
+    # runs — e.g. once per test) and filtered by blueprint name instead.
+    protected_blueprints = {"logs", "alerts", "stats", "rules"}
     if app.config.get("REQUIRE_AUTH", True):
-        logs_bp.before_request(require_auth_before_request)
-        alerts_bp.before_request(require_auth_before_request)
-        stats_bp.before_request(require_auth_before_request)
-        rules_bp.before_request(require_auth_before_request)
+        @app.before_request
+        def _enforce_auth():
+            if request.blueprint in protected_blueprints:
+                return require_auth_before_request()
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(logs_bp, url_prefix="/api/logs")
@@ -57,7 +63,12 @@ def create_app(config_class=Config):
                     # No-ops gracefully (returns a "reason") until a model has been trained
                     run_ml_detection_job()
 
-    with app.app_context():
-        db.create_all()
+    # Schema is managed by Flask-Migrate (`flask db upgrade`) now that the
+    # normalised Event schema exists — see docs/ARCHITECTURE.md. The one
+    # exception is ephemeral test/in-memory databases, which have no
+    # migration history to apply and just need the current model schema.
+    if app.config.get("AUTO_CREATE_DB", False):
+        with app.app_context():
+            db.create_all()
 
     return app

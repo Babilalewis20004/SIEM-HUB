@@ -5,13 +5,17 @@ Two layers:
 1. Threshold rules pulled from the `rules` table (user-configurable)
 2. Built-in heuristics (off-hours access) as a fallback / example
 
+Both operate on normalised `Event` records — a rule never needs to know
+whether an event came from the SSH or Nginx parser, only its Event fields
+(source_ip, event_type, category, outcome, timestamp, ...).
+
 Run via APScheduler on an interval, or trigger manually via POST /api/alerts/run-detection
 """
 from datetime import datetime, timedelta
 from collections import defaultdict
 
 from app import db
-from app.models import Log, Alert, Rule
+from app.models import Event, Alert, Rule
 
 
 def run_detection_job():
@@ -25,25 +29,28 @@ def _run_threshold_rules():
     for rule in rules:
         cond = rule.condition or {}
         event_type = cond.get("event_type")
+        category = cond.get("category")
         count_needed = cond.get("count", 5)
         window_seconds = cond.get("window_seconds", 60)
         group_by = cond.get("group_by", "source_ip")
 
         since = datetime.utcnow() - timedelta(seconds=window_seconds)
 
-        query = Log.query.filter(Log.timestamp >= since)
+        query = Event.query.filter(Event.timestamp >= since)
         if event_type:
-            query = query.filter(Log.event_type == event_type)
+            query = query.filter(Event.event_type == event_type)
+        if category:
+            query = query.filter(Event.category == category)
 
-        logs = query.all()
+        events = query.all()
         buckets = defaultdict(list)
-        for log in logs:
-            key = getattr(log, group_by, None)
+        for event in events:
+            key = getattr(event, group_by, None)
             if key:
-                buckets[key].append(log)
+                buckets[key].append(event)
 
-        for key, group_logs in buckets.items():
-            if len(group_logs) >= count_needed:
+        for key, group_events in buckets.items():
+            if len(group_events) >= count_needed:
                 # Avoid duplicate alerts for the same rule+key within the window
                 existing = Alert.query.filter(
                     Alert.rule_name == rule.name,
@@ -54,38 +61,38 @@ def _run_threshold_rules():
                     continue
 
                 alert = Alert(
-                    log_id=group_logs[-1].id,
+                    event_id=group_events[-1].id,
                     rule_name=rule.name,
                     severity=rule.severity,
-                    description=f"{rule.name}: {len(group_logs)} matching events from '{key}' "
+                    description=f"{rule.name}: {len(group_events)} matching events from '{key}' "
                                  f"in {window_seconds}s (threshold {count_needed})",
-                    context={"group_key": str(key), "count": len(group_logs), "group_by": group_by},
+                    context={"group_key": str(key), "count": len(group_events), "group_by": group_by},
                 )
                 db.session.add(alert)
 
 
 def _run_offhours_heuristic(start_hour=0, end_hour=5):
-    """Flag login_failed / login_success events that occur in off-hours as a simple
+    """Flag authentication events that occur in off-hours as a simple
     statistical baseline example. Extend with real baselining (per-host averages) later."""
     since = datetime.utcnow() - timedelta(minutes=5)
-    logs = Log.query.filter(
-        Log.timestamp >= since,
-        Log.event_type.in_(["login_failed", "login_success"]),
+    events = Event.query.filter(
+        Event.timestamp >= since,
+        Event.event_type.in_(["authentication_failure", "authentication_success"]),
     ).all()
 
-    for log in logs:
-        hour = log.timestamp.hour
+    for event in events:
+        hour = event.timestamp.hour
         if start_hour <= hour < end_hour:
-            existing = Alert.query.filter_by(rule_name="off_hours_login", log_id=log.id).first()
+            existing = Alert.query.filter_by(rule_name="off_hours_login", event_id=event.id).first()
             if existing:
                 continue
             db.session.add(
                 Alert(
-                    log_id=log.id,
+                    event_id=event.id,
                     rule_name="off_hours_login",
                     severity="info",
-                    description=f"Login activity from {log.source_ip or 'unknown IP'} during off-hours "
-                                 f"({log.timestamp.strftime('%H:%M')})",
-                    context={"source_ip": log.source_ip, "hour": hour},
+                    description=f"Login activity from {event.source_ip or 'unknown IP'} during off-hours "
+                                 f"({event.timestamp.strftime('%H:%M')})",
+                    context={"source_ip": event.source_ip, "hour": hour},
                 )
             )

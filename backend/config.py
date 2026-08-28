@@ -22,6 +22,11 @@ class Config:
 
     CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:5173")
 
+    # Schema is managed via `flask db upgrade` (Flask-Migrate) by default.
+    # Only auto-create tables from the live models when there's no migration
+    # history to apply to (e.g. test databases) — see app/__init__.py.
+    AUTO_CREATE_DB = os.environ.get("AUTO_CREATE_DB", "false").lower() == "true"
+
     # Auth
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "dev-jwt-secret-change-me")
     JWT_EXPIRATION_HOURS = int(os.environ.get("JWT_EXPIRATION_HOURS", "12"))

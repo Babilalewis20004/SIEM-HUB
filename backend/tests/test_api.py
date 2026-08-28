@@ -1,0 +1,117 @@
+from datetime import datetime
+
+from app.models import Event, Alert
+
+
+def test_register_and_login(client, db):
+    resp = client.post("/api/auth/register", json={"email": "a@example.com", "password": "password123"})
+    assert resp.status_code == 201
+    assert "token" in resp.get_json()
+
+    resp = client.post("/api/auth/login", json={"email": "a@example.com", "password": "password123"})
+    assert resp.status_code == 200
+    assert "token" in resp.get_json()
+
+
+def test_protected_routes_require_auth(client, db):
+    assert client.get("/api/logs").status_code == 401
+    assert client.get("/api/alerts").status_code == 401
+    assert client.get("/api/stats/summary").status_code == 401
+    assert client.get("/api/rules").status_code == 401
+
+
+def _seed_event(db, **overrides):
+    defaults = dict(
+        timestamp=datetime.utcnow(),
+        event_type="authentication_failure",
+        category="authentication",
+        source_type="ssh",
+        source_ip="192.168.1.50",
+        username="root",
+        hostname="server",
+        action="login",
+        outcome="failure",
+        severity="medium",
+        raw_message="Failed password for root from 192.168.1.50 port 1000 ssh2",
+    )
+    defaults.update(overrides)
+    event = Event(**defaults)
+    db.session.add(event)
+    db.session.commit()
+    return event
+
+
+def test_stats_summary_reflects_events(client, db, auth_headers):
+    _seed_event(db)
+    _seed_event(db, event_type="http_request", category="web", source_type="nginx",
+                severity="info", outcome="success", username=None,
+                raw_message="203.0.113.5 request 200")
+
+    resp = client.get("/api/stats/summary", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["total_events"] == 2
+    assert body["total_logs"] == 2  # deprecated alias stays in sync
+    assert body["events_by_category"]["authentication"] == 1
+    assert body["events_by_category"]["web"] == 1
+
+
+def test_stats_timeseries(client, db, auth_headers):
+    _seed_event(db)
+    resp = client.get("/api/stats/timeseries?hours=24", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["hours"] == 24
+    assert len(body["series"]) == 1
+    assert body["series"][0]["total"] == 1
+
+
+def test_alerts_list_and_resolve(client, db, auth_headers):
+    event = _seed_event(db)
+    alert = Alert(event_id=event.id, rule_name="brute_force_ssh", severity="critical",
+                  description="test", status="open")
+    db.session.add(alert)
+    db.session.commit()
+
+    resp = client.get("/api/alerts?status=open", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.get_json()["total"] == 1
+
+    resp = client.patch(f"/api/alerts/{alert.id}", json={"status": "resolved"}, headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "resolved"
+
+    resp = client.get("/api/alerts?status=open", headers=auth_headers)
+    assert resp.get_json()["total"] == 0
+
+
+def test_rules_crud(client, db, auth_headers):
+    resp = client.post("/api/rules", json={
+        "name": "test_rule",
+        "rule_type": "threshold",
+        "condition": {"event_type": "authentication_failure", "count": 5, "window_seconds": 60},
+    }, headers=auth_headers)
+    assert resp.status_code == 201
+    rule_id = resp.get_json()["id"]
+
+    resp = client.get("/api/rules", headers=auth_headers)
+    assert resp.status_code == 200
+    assert len(resp.get_json()) == 1
+
+    resp = client.patch(f"/api/rules/{rule_id}", json={"enabled": False}, headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.get_json()["enabled"] is False
+
+    resp = client.delete(f"/api/rules/{rule_id}", headers=auth_headers)
+    assert resp.status_code == 204
+
+
+def test_get_single_log_event(client, db, auth_headers):
+    event = _seed_event(db)
+    resp = client.get(f"/api/logs/{event.id}", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["id"] == event.id
+    assert body["event_type"] == "authentication_failure"
+    # legacy aliases still present for older frontend code
+    assert body["source"] == "ssh"
