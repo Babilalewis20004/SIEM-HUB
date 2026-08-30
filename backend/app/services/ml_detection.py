@@ -33,7 +33,7 @@ from sklearn.preprocessing import StandardScaler
 
 from app import db
 from app.models import Event, Alert
-from app.services import correlation
+from app.services import enrichment
 
 FEATURE_NAMES = [
     "total_events",
@@ -243,7 +243,7 @@ def run_ml_detection_job():
         )
         db.session.add(alert)
         db.session.flush()
-        correlation.correlate_alert(alert)
+        enrichment.enrich_and_correlate(alert)
         created += 1
 
     db.session.commit()

@@ -421,3 +421,122 @@ body {
   color: var(--text);
   padding: 6px 8px;
 }
+
+/* --- MITRE / IOC / risk enrichment --- */
+
+.mitre-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  background: rgba(230, 73, 61, 0.12);
+  border: 1px solid rgba(230, 73, 61, 0.3);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  margin: 2px 4px 2px 0;
+}
+
+.mitre-chip a { color: var(--critical); font-weight: 700; text-decoration: none; }
+.mitre-chip a:hover { text-decoration: underline; }
+.mitre-chip .mitre-tactic { color: var(--muted); font-size: 11px; }
+
+.ioc-chip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  margin: 2px 4px 2px 0;
+  min-width: 180px;
+}
+
+.ioc-chip .ioc-indicator { font-family: monospace; font-weight: 600; }
+.ioc-chip .ioc-meta { color: var(--muted); font-size: 11px; }
+
+.threat-unknown { color: var(--muted); }
+.threat-low { color: #3cc878; }
+.threat-medium { color: var(--warning); }
+.threat-high { color: var(--critical); }
+.threat-critical { color: var(--critical); font-weight: 700; }
+
+.risk-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.risk-low { background: rgba(60, 200, 120, 0.18); color: #3cc878; }
+.risk-medium { background: rgba(245, 166, 35, 0.18); color: var(--warning); }
+.risk-high { background: rgba(230, 73, 61, 0.18); color: var(--critical); }
+.risk-critical { background: rgba(230, 73, 61, 0.3); color: var(--critical); }
+
+.expand-toggle {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+}
+
+.enrichment-detail {
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 14px;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.enrichment-section-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.enrichment-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ioc-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.ioc-form input, .ioc-form select, .ioc-form textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.ioc-form textarea {
+  grid-column: 1 / -1;
+}
+
+.import-panel textarea {
+  width: 100%;
+  min-height: 120px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: monospace;
+  font-size: 12px;
+  padding: 10px;
+}

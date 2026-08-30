@@ -9,6 +9,7 @@ const ADMIN_PERMISSIONS = new Set([
   "incidents.read", "incidents.update", "incidents.assign", "incidents.resolve",
   "rules.read", "rules.create", "rules.update", "rules.delete",
   "ml.train", "detection.run", "audit.read",
+  "mitre.read", "iocs.read", "iocs.manage",
 ]);
 
 const ANALYST_PERMISSIONS = new Set([
@@ -18,6 +19,7 @@ const ANALYST_PERMISSIONS = new Set([
   "incidents.read", "incidents.update", "incidents.assign", "incidents.resolve",
   "rules.read",
   "detection.run",
+  "mitre.read", "iocs.read",
 ]);
 
 const VIEWER_PERMISSIONS = new Set([
@@ -25,6 +27,7 @@ const VIEWER_PERMISSIONS = new Set([
   "alerts.read",
   "incidents.read",
   "rules.read",
+  "mitre.read", "iocs.read",
 ]);
 
 const ROLE_PERMISSIONS = {

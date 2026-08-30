@@ -20,6 +20,7 @@ from flask import current_app
 
 from app import db
 from app.models import Incident
+from app.models.ioc import IOCMatch
 from app.services.incidents import severity_for_alert, priority_for_severity
 
 SCORE_SOURCE_IP = 40
@@ -27,6 +28,7 @@ SCORE_DEST_HOST = 30
 SCORE_USERNAME = 20
 SCORE_CATEGORY = 10
 SCORE_TIME_WINDOW = 20
+SCORE_SHARED_IOC = 35
 
 # Incidents past these statuses are considered closed investigations and are
 # never auto-correlated into (a resolved brute-force incident shouldn't
@@ -73,6 +75,23 @@ def _score(new_event, candidate_event, window: timedelta):
     return score, reasons
 
 
+def _ioc_ids(alert):
+    """{ioc_id: indicator} for the IOCs matched on this alert (see
+    app/services/ioc_matching.py). A missing/failed IOC enrichment just
+    yields an empty dict, so this signal degrades gracefully."""
+    return {m.ioc_id: (m.ioc.indicator if m.ioc else m.matched_value) for m in (alert.ioc_matches or [])}
+
+
+def _ioc_signal(new_ioc_ids, candidate_alert):
+    if not new_ioc_ids:
+        return 0, []
+    shared = new_ioc_ids.keys() & _ioc_ids(candidate_alert).keys()
+    if not shared:
+        return 0, []
+    indicator = new_ioc_ids[next(iter(shared))]
+    return SCORE_SHARED_IOC, [f"shared threat intel indicator ({indicator})"]
+
+
 def correlate_alert(alert):
     """Attach `alert` to the best-matching open/investigating/contained
     Incident, or create a new one. Must be called after the alert has been
@@ -101,11 +120,16 @@ def correlate_alert(alert):
     best_score = 0
     best_reasons = []
 
+    new_ioc_ids = _ioc_ids(alert)
+
     for incident in candidates:
         for candidate_alert in incident.alerts:
             if candidate_alert.id == alert.id:
                 continue
             score, reasons = _score(new_event, candidate_alert.event, window)
+            ioc_score, ioc_reasons = _ioc_signal(new_ioc_ids, candidate_alert)
+            score += ioc_score
+            reasons = reasons + ioc_reasons
             if score > best_score:
                 best_score, best_incident, best_reasons = score, incident, reasons
 

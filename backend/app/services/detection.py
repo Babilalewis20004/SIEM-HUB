@@ -16,7 +16,7 @@ from collections import defaultdict
 
 from app import db
 from app.models import Event, Alert, Rule
-from app.services import correlation
+from app.services import enrichment
 
 
 def run_detection_job():
@@ -77,7 +77,7 @@ def _run_threshold_rules():
                 )
                 db.session.add(alert)
                 db.session.flush()
-                correlation.correlate_alert(alert)
+                enrichment.enrich_and_correlate(alert)
 
 
 def _run_offhours_heuristic(start_hour=0, end_hour=5):
@@ -107,4 +107,4 @@ def _run_offhours_heuristic(start_hour=0, end_hour=5):
             )
             db.session.add(alert)
             db.session.flush()
-            correlation.correlate_alert(alert)
+            enrichment.enrich_and_correlate(alert)

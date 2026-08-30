@@ -36,20 +36,29 @@ class Alert(db.Model):
     resolved_at = db.Column(db.DateTime, nullable=True)
     resolved_by_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=True)
 
-    # MITRE ATT&CK mapping, captured at creation time (see app/models/rule.py
-    # for the source-of-truth fields on rule-driven alerts).
+    # Legacy flat MITRE mapping, captured at creation time (see
+    # app/models/rule.py for the source-of-truth fields on rule-driven
+    # alerts). Superseded by the mitre_techniques many-to-many relationship
+    # below, populated by app/services/mitre_enrichment.py.
     mitre_tactic = db.Column(db.String(128), nullable=True)
     mitre_technique = db.Column(db.String(16), nullable=True)
     mitre_subtechnique = db.Column(db.String(16), nullable=True)
 
     incident_id = db.Column(db.String(36), db.ForeignKey("incidents.id"), nullable=True, index=True)
 
+    mitre_techniques = db.relationship(
+        "MitreTechnique", secondary="alert_mitre_techniques", lazy=True,
+    )
+    ioc_matches = db.relationship("IOCMatch", backref="alert", lazy=True)
+
     @property
     def log_id(self):
         """Deprecated alias for event_id."""
         return self.event_id
 
-    def to_dict(self):
+    def to_dict(self, include_risk=True):
+        from app.services.risk_scoring import compute_overall_risk
+
         event = self.event
         return {
             "id": self.id,
@@ -73,6 +82,9 @@ class Alert(db.Model):
             "mitre_tactic": self.mitre_tactic,
             "mitre_technique": self.mitre_technique,
             "mitre_subtechnique": self.mitre_subtechnique,
+            "mitre": [t.to_summary_dict() for t in self.mitre_techniques],
+            "ioc_matches": [m.to_summary_dict() for m in self.ioc_matches],
             "incident_id": self.incident_id,
             "event": event.to_dict() if event else None,
+            "risk": compute_overall_risk(self) if include_risk else None,
         }

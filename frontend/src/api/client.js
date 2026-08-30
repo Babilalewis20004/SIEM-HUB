@@ -82,4 +82,26 @@ export const setIncidentStatus = (id, status, reopen = false) =>
 export const addIncidentNote = (id, content) =>
   client.post(`/incidents/${id}/notes`, { content }).then((r) => r.data);
 
+export const getMitreTechniques = () =>
+  client.get("/mitre/techniques").then((r) => r.data);
+
+export const getIOCs = (params = {}) =>
+  client.get("/iocs", { params }).then((r) => r.data);
+export const getIOC = (id) =>
+  client.get(`/iocs/${id}`).then((r) => r.data);
+export const createIOC = (data) =>
+  client.post("/iocs", data).then((r) => r.data);
+export const updateIOC = (id, data) =>
+  client.patch(`/iocs/${id}`, data).then((r) => r.data);
+export const deleteIOC = (id) =>
+  client.delete(`/iocs/${id}`).then((r) => r.data);
+export const enableIOC = (id) =>
+  client.post(`/iocs/${id}/enable`).then((r) => r.data);
+export const disableIOC = (id) =>
+  client.post(`/iocs/${id}/disable`).then((r) => r.data);
+export const importIOCs = (iocs) =>
+  client.post("/iocs/import", { iocs }).then((r) => r.data);
+export const getIOCMatches = (id) =>
+  client.get(`/iocs/${id}/matches`).then((r) => r.data);
+
 export default client;

@@ -279,3 +279,119 @@ incident create/assign/status-change/note, rule changes, ML training) are
 recorded in `AuditLog` (`app/models/audit_log.py`) via the single write path
 `app/services/audit.py::log_action` — actor, action, target, and metadata
 only; never passwords, tokens, or other secrets.
+
+# Architecture: MITRE ATT&CK Enrichment + IOC / Threat Intel Correlation
+
+## Enrichment pipeline
+
+```text
+Event
+ |
+ v
+Detection (app/services/detection.py, ml_detection.py)
+ |
+ v
+Alert created (flushed, alert.id populated)
+ |
+ v
+app/services/enrichment.py::enrich_and_correlate(alert)
+ |
+ +--> MITRE enrichment (app/services/mitre_enrichment.py)   -- best-effort
+ +--> IOC matching     (app/services/ioc_matching.py)       -- best-effort
+ |
+ v
+Correlation (app/services/correlation.py, unchanged core logic + one new
+             "shared IOC" signal)
+ |
+ v
+Incident
+```
+
+MITRE enrichment and IOC matching are each wrapped in their own try/except
+inside `enrich_and_correlate` — a bug or outage in either can never prevent
+the underlying Alert from being created/committed, and correlation always
+runs regardless. This is the practical meaning of "enrichment is a
+dependency, not a single point of failure" for this project.
+
+**Detection** decides "this behaviour is suspicious" (unchanged).
+**MITRE enrichment** decides "does the rule that fired have a documented
+ATT&CK mapping" — it copies technique(s) already mapped to the rule; it
+never invents a mapping. **IOC matching** decides "does this event's
+IP/domain/URL/hash appear in the IOC table" — it's a lookup, not a fetch;
+IOCs are never resolved or executed. **Correlation** is unchanged in scope
+(same alert -> incident grouping decision), just gains one more signal.
+
+## MITRE catalogue + mapping
+
+`MitreTechnique` (`app/models/mitre.py`) is a small internal catalogue —
+only techniques an actual detection maps to are seeded (see `seed.py`), not
+the full ATT&CK matrix. `Rule.mitre_techniques` and `Alert.mitre_techniques`
+are many-to-many relationships (`rule_mitre_techniques` /
+`alert_mitre_techniques` join tables) so a single rule can map to multiple
+techniques. The alert-side mapping is copied at enrichment time rather than
+read live off the rule, so editing a rule's mapping later never rewrites the
+ATT&CK context already recorded on old alerts — the same rationale as the
+pre-existing flat `mitre_tactic`/`mitre_technique`/`mitre_subtechnique`
+columns on both models, which stay in place for backward compatibility.
+
+Current mapping: `brute_force_ssh` -> `T1110` (Brute Force / Credential
+Access). No other existing detection (`http_error_burst`, the off-hours
+heuristic, the ML Isolation Forest) has a mapping — none of them are a
+clean, justified match for a single ATT&CK technique, and a rule-less alert
+(ML/statistical) always enriches to `mitre: []`.
+
+## IOC / threat intelligence
+
+`IOC` (`app/models/ioc.py`) is the normalised, deduplicated indicator table
+— uniqueness is `(indicator_type, normalized_indicator)`, enforced by a DB
+constraint. `app/services/ioc_normalization.py` is the only place that
+decides what "normalized" means per type (IP via `ipaddress`, domain
+lower-cased/trailing-dot-stripped, URL scheme+host lower-cased via
+`urllib.parse`, hashes lower-cased/length-validated) — every writer (manual
+create, CSV/JSON import) goes through it. Domain matching is **exact only**:
+a subdomain never matches its parent domain's IOC.
+
+`app/services/ioc_matching.py` extracts candidate indicators from an
+Event's `source_ip`/`destination_ip` (always) and `parsed_fields`
+domain/url/hash keys (opportunistically — today's SSH/Nginx parsers don't
+populate these, so this is forward-compatible, not currently exercised) and
+does one bulk `IN (...)` query per indicator type — never one query per
+indicator. `IOCMatch` is the evidence trail (which field, which value,
+against which IOC, at what confidence) written for both the `Event` and the
+`Alert` it's attached to. An IOC's `enabled`/`expires_at` gate future
+matches but never delete past `IOCMatch` rows — history is preserved even
+after an IOC is disabled, expires, or (if it has no match history) deleted.
+`ThreatIntelSource` is a lightweight source registry only; `IOC.source` is a
+free-text label so local CSV/JSON import (`POST /api/iocs/import`) never
+requires one to exist first, and the matching engine never hard-codes a
+provider.
+
+## Risk scoring
+
+`app/services/risk_scoring.py::compute_overall_risk(alert)` combines
+`alert.severity` (60%) and the highest `threat_level` among the alert's IOC
+matches (40%, only when at least one match exists) into an `overall_risk`
+label. This is an explicitly documented, transparent application heuristic
+— not a validated model — and it never overwrites `alert.severity` or an
+IOC's own `threat_level`; both stay visible alongside it in the API
+response's `risk` object.
+
+## Correlation: the new IOC signal
+
+`app/services/correlation.py` gains one additional scored signal on top of
+the existing source-IP/hostname/username/category/time-window ones (see
+"Correlation scoring" above): if the new alert and a candidate alert share
+at least one matched `ioc_id`, that's worth +35 points toward the existing
+`CORRELATION_SCORE_THRESHOLD`. It does not replace or lower the bar for the
+existing signals, and does not automatically merge every alert that happens
+to share an IOC — it's one more input to the same scored, explainable
+decision.
+
+## RBAC
+
+Two new permissions: `mitre.read` (all three roles — same tier as
+`rules.read`) and `iocs.read`/`iocs.manage` (`iocs.manage` — create, update,
+delete, import, enable, disable — is admin-only; analyst and viewer get
+`iocs.read`). IOC/MITRE mutations are audited the same way as everything
+else — `ioc.created`, `ioc.updated`, `ioc.enabled`, `ioc.disabled`,
+`ioc.deleted`, `ioc.imported`, `rule.mitre_mapping_changed`.

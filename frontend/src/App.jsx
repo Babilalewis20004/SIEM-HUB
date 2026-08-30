@@ -7,6 +7,7 @@ import Logs from "./pages/Logs.jsx";
 import Incidents from "./pages/Incidents.jsx";
 import IncidentDetail from "./pages/IncidentDetail.jsx";
 import Users from "./pages/Users.jsx";
+import IOCs from "./pages/IOCs.jsx";
 import Login from "./pages/Login.jsx";
 
 function RequirePermission({ permission, children }) {
@@ -37,6 +38,7 @@ function AppShell() {
         <NavLink to="/alerts" className="nav-link">Alerts</NavLink>
         <NavLink to="/logs" className="nav-link">Logs</NavLink>
         <NavLink to="/incidents" className="nav-link">Incidents</NavLink>
+        {can("iocs.read") && <NavLink to="/iocs" className="nav-link">Threat Intel</NavLink>}
         {can("users.manage") && <NavLink to="/users" className="nav-link">Users</NavLink>}
 
         <div className="sidebar-footer">
@@ -54,6 +56,14 @@ function AppShell() {
           <Route path="/logs" element={<Logs />} />
           <Route path="/incidents" element={<Incidents />} />
           <Route path="/incidents/:id" element={<IncidentDetail />} />
+          <Route
+            path="/iocs"
+            element={
+              <RequirePermission permission="iocs.read">
+                <IOCs />
+              </RequirePermission>
+            }
+          />
           <Route
             path="/users"
             element={

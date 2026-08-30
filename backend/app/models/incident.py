@@ -46,6 +46,28 @@ class Incident(db.Model):
         order_by="IncidentNote.created_at", cascade="all, delete-orphan",
     )
 
+    def enrichment_summary(self):
+        """Aggregated MITRE + IOC context across every alert on this
+        incident, deduplicated -- an analyst-facing rollup, not raw feed
+        data (see docs/ARCHITECTURE.md's enrichment section)."""
+        techniques = {}
+        iocs = {}
+        for alert in self.alerts:
+            for t in alert.mitre_techniques:
+                techniques[t.technique_id] = t.to_summary_dict()
+            for m in alert.ioc_matches:
+                if m.ioc is None:
+                    continue
+                iocs[m.ioc.id] = {
+                    "indicator": m.ioc.indicator,
+                    "indicator_type": m.ioc.indicator_type,
+                    "threat_level": m.ioc.threat_level,
+                }
+        return {
+            "mitre_techniques": list(techniques.values()),
+            "ioc_matches": list(iocs.values()),
+        }
+
     def to_dict(self, include_alerts=True, include_notes=False):
         data = {
             "id": self.id,
@@ -63,6 +85,7 @@ class Incident(db.Model):
             "resolved_by": self.resolved_by,
             "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
             "alert_count": len(self.alerts),
+            "enrichment_summary": self.enrichment_summary(),
         }
         if include_alerts:
             data["alerts"] = [a.to_dict() for a in self.alerts]

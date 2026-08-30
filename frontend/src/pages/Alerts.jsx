@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAlerts, updateAlert, runDetection, getMlStatus, trainModel } from "../api/client";
 import { usePermissions } from "../context/PermissionContext.jsx";
+import EnrichmentPanel from "../components/EnrichmentPanel.jsx";
 
 const SEVERITY_COLORS = { info: "#4f8cff", warning: "#f5a623", critical: "#e6493d" };
 
@@ -48,6 +49,7 @@ function MlPanel() {
 
 export default function Alerts() {
   const [status, setStatus] = useState("open");
+  const [expandedId, setExpandedId] = useState(null);
   const { can } = usePermissions();
   const queryClient = useQueryClient();
 
@@ -106,51 +108,73 @@ export default function Alerts() {
           <tbody>
             {(data?.items ?? []).map((alert) => {
               const isMl = alert.detection_source === "ml";
+              const hasEnrichment = (alert.mitre?.length > 0) || (alert.ioc_matches?.length > 0);
+              const isExpanded = expandedId === alert.id;
               return (
-                <tr key={alert.id}>
-                  <td>
-                    <span
-                      className="severity-dot"
-                      style={{ background: SEVERITY_COLORS[alert.severity] }}
-                    />
-                    {alert.severity}
-                  </td>
-                  <td>
-                    {isMl && <span className="ml-badge">ML</span>}
-                    {alert.title || alert.rule_name}
-                    {alert.mitre_technique && <span className="mitre-badge">{alert.mitre_technique}</span>}
-                  </td>
-                  <td>
-                    {alert.description}
-                    {isMl && alert.anomaly_score !== null && alert.anomaly_score !== undefined && (
-                      <div className="ml-score">score: {alert.anomaly_score}</div>
-                    )}
-                  </td>
-                  <td>{new Date(alert.created_at).toLocaleString()}</td>
-                  <td>{alert.status}</td>
-                  <td className="row-actions">
-                    {alert.status === "open" && can("alerts.acknowledge") && (
+                <Fragment key={alert.id}>
+                  <tr>
+                    <td>
+                      <span
+                        className="severity-dot"
+                        style={{ background: SEVERITY_COLORS[alert.severity] }}
+                      />
+                      {alert.severity}
+                    </td>
+                    <td>
+                      {isMl && <span className="ml-badge">ML</span>}
                       <button
-                        onClick={() => mutation.mutate({ id: alert.id, data: { status: "acknowledged" } })}
+                        className="expand-toggle"
+                        onClick={() => setExpandedId(isExpanded ? null : alert.id)}
                       >
-                        Acknowledge
+                        {alert.title || alert.rule_name} {isExpanded ? "▾" : "▸"}
                       </button>
-                    )}
-                    {alert.status !== "resolved" && can("alerts.resolve") && (
-                      <button
-                        onClick={() => mutation.mutate({ id: alert.id, data: { status: "resolved" } })}
-                      >
-                        Resolve
-                      </button>
-                    )}
-                    {alert.incident_id && (
-                      <Link to={`/incidents/${alert.incident_id}`}>View Incident</Link>
-                    )}
-                    {alert.event_id && (
-                      <Link to={`/logs?event=${alert.event_id}`}>View Event</Link>
-                    )}
-                  </td>
-                </tr>
+                      {hasEnrichment && !isExpanded && (
+                        <span className="ioc-meta"> (enrichment available)</span>
+                      )}
+                    </td>
+                    <td>
+                      {alert.description}
+                      {isMl && alert.anomaly_score !== null && alert.anomaly_score !== undefined && (
+                        <div className="ml-score">score: {alert.anomaly_score}</div>
+                      )}
+                    </td>
+                    <td>{new Date(alert.created_at).toLocaleString()}</td>
+                    <td>{alert.status}</td>
+                    <td className="row-actions">
+                      {alert.status === "open" && can("alerts.acknowledge") && (
+                        <button
+                          onClick={() => mutation.mutate({ id: alert.id, data: { status: "acknowledged" } })}
+                        >
+                          Acknowledge
+                        </button>
+                      )}
+                      {alert.status !== "resolved" && can("alerts.resolve") && (
+                        <button
+                          onClick={() => mutation.mutate({ id: alert.id, data: { status: "resolved" } })}
+                        >
+                          Resolve
+                        </button>
+                      )}
+                      {alert.incident_id && (
+                        <Link to={`/incidents/${alert.incident_id}`}>View Incident</Link>
+                      )}
+                      {alert.event_id && (
+                        <Link to={`/logs?event=${alert.event_id}`}>View Event</Link>
+                      )}
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr>
+                      <td colSpan={6}>
+                        <EnrichmentPanel
+                          mitre={alert.mitre}
+                          iocMatches={alert.ioc_matches}
+                          risk={alert.risk}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>

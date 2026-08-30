@@ -5,6 +5,7 @@ import {
   getIncident, assignIncident, setIncidentStatus, addIncidentNote, getUsers,
 } from "../api/client";
 import { usePermissions } from "../context/PermissionContext.jsx";
+import { MitreBadgeList } from "../components/MitreBadge.jsx";
 
 const STATUSES = ["open", "investigating", "contained", "resolved", "closed"];
 
@@ -95,6 +96,27 @@ export default function IncidentDetail() {
         )}
         {statusMutation.isError && (
           <p className="auth-error">{statusMutation.error?.response?.data?.error}</p>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Threat Intelligence &amp; MITRE ATT&amp;CK</h3>
+        <div className="enrichment-section-label">MITRE ATT&amp;CK techniques observed</div>
+        <MitreBadgeList techniques={incident.enrichment_summary?.mitre_techniques} />
+        <div className="enrichment-section-label" style={{ marginTop: 10 }}>IOC matches</div>
+        {(incident.enrichment_summary?.ioc_matches ?? []).length === 0 ? (
+          <span className="enrichment-empty">No threat intelligence matches.</span>
+        ) : (
+          <div>
+            {incident.enrichment_summary.ioc_matches.map((m) => (
+              <span className="ioc-chip" key={m.indicator}>
+                <span className="ioc-indicator">{m.indicator}</span>
+                <span className={`ioc-meta threat-${m.threat_level || "unknown"}`}>
+                  {m.indicator_type} · {(m.threat_level || "unknown").toUpperCase()}
+                </span>
+              </span>
+            ))}
+          </div>
         )}
       </div>
 

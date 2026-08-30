@@ -8,11 +8,49 @@ import random
 
 from app import create_app, db
 from app.models import Rule, Event, User
+from app.models.mitre import MitreTechnique
 from app.services.ml_detection import train_model
 
 app = create_app()
 
 with app.app_context():
+    # --- MITRE ATT&CK catalogue + mapping ---
+    # Only techniques that map to a detection this project actually ships.
+    # T1110 (Brute Force / Credential Access) matches brute_force_ssh's
+    # semantics exactly -- repeated failed authentication attempts.
+    # http_error_burst (web error volume) and the off-hours/ML heuristics
+    # get no mapping: none of them are a clean, justified match for any
+    # single ATT&CK technique, and inventing one would mislead an analyst.
+    t1110 = MitreTechnique.query.filter_by(technique_id="T1110").first()
+    if not t1110:
+        t1110 = MitreTechnique(
+            technique_id="T1110",
+            name="Brute Force",
+            tactic="Credential Access",
+            description="Adversaries may use brute force techniques to gain access to accounts "
+                        "when passwords are unknown or when password hashes are obtained.",
+            url="https://attack.mitre.org/techniques/T1110/",
+        )
+        db.session.add(t1110)
+        db.session.commit()
+
+    # --- Sample IOC ---
+    # Matches the source IP of the brute-force burst seeded below, so a
+    # fresh `python seed.py` + a detection run produces a fully enriched
+    # demo alert/incident (MITRE T1110 + IOC match) out of the box.
+    from app.models.ioc import IOC
+    if not IOC.query.filter_by(indicator_type="ip", normalized_indicator="203.0.113.5").first():
+        db.session.add(IOC(
+            indicator="203.0.113.5",
+            indicator_type="ip",
+            normalized_indicator="203.0.113.5",
+            threat_level="high",
+            confidence=92,
+            source="internal",
+            description="Known brute-force source (demo data).",
+        ))
+        db.session.commit()
+
     # --- Default admin user (dev convenience — change this password immediately) ---
     DEFAULT_ADMIN_EMAIL = "admin@example.com"
     DEFAULT_ADMIN_PASSWORD = "changeme123"
@@ -25,8 +63,9 @@ with app.app_context():
         print("  -> Log in with these, then change the password (or delete this user and register your own).")
 
     # --- Default rules ---
-    if not Rule.query.filter_by(name="brute_force_ssh").first():
-        db.session.add(Rule(
+    brute_force_rule = Rule.query.filter_by(name="brute_force_ssh").first()
+    if not brute_force_rule:
+        brute_force_rule = Rule(
             name="brute_force_ssh",
             rule_type="threshold",
             condition={
@@ -36,7 +75,15 @@ with app.app_context():
                 "group_by": "source_ip",
             },
             severity="critical",
-        ))
+        )
+        db.session.add(brute_force_rule)
+    # Backfill the MITRE mapping even onto a rule that already existed from
+    # before this catalogue was added, so re-running seed.py on an older DB
+    # still ends up fully mapped.
+    if t1110 not in brute_force_rule.mitre_techniques:
+        brute_force_rule.mitre_tactic = t1110.tactic
+        brute_force_rule.mitre_technique = t1110.technique_id
+        brute_force_rule.mitre_techniques = [t1110]
 
     if not Rule.query.filter_by(name="http_error_burst").first():
         db.session.add(Rule(

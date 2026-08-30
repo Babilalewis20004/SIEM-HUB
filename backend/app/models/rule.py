@@ -25,14 +25,20 @@ class Rule(db.Model):
     severity = db.Column(db.String(16), default="warning")
     enabled = db.Column(db.Boolean, default=True)
 
-    # MITRE ATT&CK mapping (see app/models/alert.py for the denormalised
-    # per-alert copy captured at detection time).
+    # Legacy flat MITRE mapping (see app/models/alert.py for the denormalised
+    # per-alert copy captured at detection time). Superseded by the
+    # mitre_techniques many-to-many relationship below for new mappings, but
+    # kept populated/readable for back-compat with existing rules/alerts.
     mitre_tactic = db.Column(db.String(128), nullable=True)
     mitre_technique = db.Column(db.String(16), nullable=True)      # e.g. "T1110"
     mitre_subtechnique = db.Column(db.String(16), nullable=True)   # e.g. "T1110.001"
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    mitre_techniques = db.relationship(
+        "MitreTechnique", secondary="rule_mitre_techniques", lazy=True,
+    )
 
     def to_dict(self):
         return {
@@ -45,6 +51,7 @@ class Rule(db.Model):
             "mitre_tactic": self.mitre_tactic,
             "mitre_technique": self.mitre_technique,
             "mitre_subtechnique": self.mitre_subtechnique,
+            "mitre": [t.to_summary_dict() for t in self.mitre_techniques],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
