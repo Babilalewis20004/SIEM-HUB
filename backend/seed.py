@@ -9,6 +9,7 @@ import random
 from app import create_app, db
 from app.models import Rule, Event, User
 from app.models.mitre import MitreTechnique
+from app.playbooks.models import Playbook
 from app.services.ml_detection import train_model
 
 app = create_app()
@@ -98,6 +99,57 @@ with app.app_context():
             severity="warning",
         ))
 
+    db.session.commit()
+
+    # --- Default playbooks (Part Y demonstration set) ---
+    # All three are deliberately non-destructive: block_ip only ever reaches
+    # MockResponseProvider (see app/playbooks/providers.py), never a real
+    # network device, and every step is a registered action (see
+    # app/playbooks/registry.py) -- no arbitrary code in `steps`.
+    _default_playbooks = [
+        {
+            "name": "SSH Brute Force Response",
+            "description": "Tags and annotates the incident when the brute_force_ssh rule fires. "
+                            "No external/destructive action -- investigation aid only.",
+            "trigger_type": "alert",
+            "trigger_condition": {"rule_name": "brute_force_ssh"},
+            "steps": [
+                {"action": "add_incident_tag", "parameters": {"tag": "brute-force"}},
+                {"action": "create_case_note",
+                 "parameters": {"content": "Automated brute-force response initiated by playbook."}},
+                {"action": "notify_analyst", "parameters": {"message": "SSH brute-force detected."}},
+            ],
+        },
+        {
+            "name": "Malicious IOC Investigation",
+            "description": "Tags and annotates the incident on a high-confidence IOC match, then "
+                            "requests approval to block the source IP (simulated -- MockResponseProvider).",
+            "trigger_type": "alert",
+            "trigger_condition": {"ioc_match": True},
+            "steps": [
+                {"action": "add_incident_tag", "parameters": {"tag": "malicious-ioc"}},
+                {"action": "create_case_note",
+                 "parameters": {"content": "Alert matched a known-malicious indicator of compromise."}},
+                {"action": "notify_analyst", "parameters": {"message": "Malicious IOC match -- review recommended."}},
+                {"action": "block_ip", "parameters": {"ip": "{{source_ip}}"}},
+            ],
+        },
+        {
+            "name": "Critical Incident Notification",
+            "description": "Notifies the SOC and adds an investigation note whenever an incident's "
+                            "severity reaches critical.",
+            "trigger_type": "incident",
+            "trigger_condition": {"severity": "critical"},
+            "steps": [
+                {"action": "notify_analyst", "parameters": {"message": "Critical incident opened."}},
+                {"action": "create_case_note",
+                 "parameters": {"content": "Incident automatically flagged as critical severity."}},
+            ],
+        },
+    ]
+    for pb in _default_playbooks:
+        if not Playbook.query.filter_by(name=pb["name"]).first():
+            db.session.add(Playbook(**pb))
     db.session.commit()
 
     # --- Sample events (only if DB is empty) ---

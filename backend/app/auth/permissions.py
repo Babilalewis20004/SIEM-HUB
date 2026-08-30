@@ -38,6 +38,17 @@ MITRE_READ = "mitre.read"
 IOCS_READ = "iocs.read"
 IOCS_MANAGE = "iocs.manage"  # create/update/delete/import/enable/disable
 
+# Playbooks: EXECUTE covers both running a low-risk playbook outright and
+# requesting a high-risk one (which then just parks at awaiting_approval);
+# APPROVE is the separate, admin-only gate on actually running a high-risk
+# step, kept distinct from MANAGE (authoring/editing playbook definitions)
+# and from EXECUTE so a policy change here can't silently grant execution
+# rights meant only for editing, or vice versa.
+PLAYBOOKS_READ = "playbooks.read"
+PLAYBOOKS_MANAGE = "playbooks.manage"
+PLAYBOOKS_EXECUTE = "playbooks.execute"
+PLAYBOOKS_APPROVE = "playbooks.approve"
+
 _ADMIN_PERMISSIONS = {
     USERS_READ, USERS_MANAGE,
     EVENTS_READ, LOGS_UPLOAD,
@@ -46,6 +57,7 @@ _ADMIN_PERMISSIONS = {
     RULES_READ, RULES_CREATE, RULES_UPDATE, RULES_DELETE,
     ML_TRAIN, DETECTION_RUN, AUDIT_READ,
     MITRE_READ, IOCS_READ, IOCS_MANAGE,
+    PLAYBOOKS_READ, PLAYBOOKS_MANAGE, PLAYBOOKS_EXECUTE, PLAYBOOKS_APPROVE,
 }
 
 _ANALYST_PERMISSIONS = {
@@ -56,6 +68,7 @@ _ANALYST_PERMISSIONS = {
     RULES_READ,
     DETECTION_RUN,
     MITRE_READ, IOCS_READ,
+    PLAYBOOKS_READ, PLAYBOOKS_EXECUTE,
 }
 
 _VIEWER_PERMISSIONS = {
@@ -64,6 +77,7 @@ _VIEWER_PERMISSIONS = {
     INCIDENTS_READ,
     RULES_READ,
     MITRE_READ, IOCS_READ,
+    PLAYBOOKS_READ,
 }
 
 ROLE_PERMISSIONS = {

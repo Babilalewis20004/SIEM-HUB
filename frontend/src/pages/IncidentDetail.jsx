@@ -5,6 +5,7 @@ import {
   getIncident, assignIncident, setIncidentStatus, addIncidentNote, getUsers,
 } from "../api/client";
 import { usePermissions } from "../context/PermissionContext.jsx";
+import { useRealtime } from "../hooks/useRealtime.js";
 import { MitreBadgeList } from "../components/MitreBadge.jsx";
 
 const STATUSES = ["open", "investigating", "contained", "resolved", "closed"];
@@ -26,6 +27,19 @@ export default function IncidentDetail() {
     queryClient.invalidateQueries({ queryKey: ["incident", id] });
     queryClient.invalidateQueries({ queryKey: ["incidents"] });
   };
+
+  // Live investigation timeline (Part 10): a new alert/note/status change
+  // on THIS incident refreshes the detail view without a manual reload.
+  // Events for other incidents are ignored here (still covered by the
+  // Incidents list page's own broader invalidation).
+  const onRealtimeIncidentEvent = (envelope) => {
+    const eventIncidentId = envelope.data.id ?? envelope.data.incident_id;
+    if (eventIncidentId === id) invalidate();
+  };
+  useRealtime("incident.updated", onRealtimeIncidentEvent);
+  useRealtime("incident.assigned", onRealtimeIncidentEvent);
+  useRealtime("incident.status_changed", onRealtimeIncidentEvent);
+  useRealtime("incident.note_added", onRealtimeIncidentEvent);
 
   const assignMutation = useMutation({
     mutationFn: (userId) => assignIncident(id, userId || null),
@@ -61,6 +75,12 @@ export default function IncidentDetail() {
           <dt>Severity</dt><dd>{incident.severity}</dd>
           <dt>Status</dt><dd><span className={`pill pill-status-${incident.status}`}>{incident.status}</span></dd>
           <dt>Priority</dt><dd>{incident.priority}</dd>
+          <dt>Tags</dt>
+          <dd>
+            {(incident.tags ?? []).length === 0
+              ? "—"
+              : incident.tags.map((tag) => <span key={tag} className="pill" style={{ marginRight: 6 }}>{tag}</span>)}
+          </dd>
           <dt>Assigned</dt>
           <dd>
             {can("incidents.assign") ? (
@@ -153,7 +173,7 @@ export default function IncidentDetail() {
         <h3>Investigation Notes</h3>
         {(incident.notes ?? []).map((n) => (
           <div key={n.id} className="note-card">
-            <div className="note-meta">{n.author_id} · {new Date(n.created_at).toLocaleString()}</div>
+            <div className="note-meta">{n.author_id || "System (playbook)"} · {new Date(n.created_at).toLocaleString()}</div>
             <div>{n.content}</div>
           </div>
         ))}

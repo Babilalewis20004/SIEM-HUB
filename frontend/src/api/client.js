@@ -104,4 +104,24 @@ export const importIOCs = (iocs) =>
 export const getIOCMatches = (id) =>
   client.get(`/iocs/${id}/matches`).then((r) => r.data);
 
+export const getPlaybooks = () => client.get("/playbooks").then((r) => r.data);
+export const getPlaybook = (id) => client.get(`/playbooks/${id}`).then((r) => r.data);
+export const getPlaybookActions = () => client.get("/playbooks/actions").then((r) => r.data);
+export const createPlaybook = (data) => client.post("/playbooks", data).then((r) => r.data);
+export const updatePlaybook = (id, data) => client.patch(`/playbooks/${id}`, data).then((r) => r.data);
+export const deletePlaybook = (id) => client.delete(`/playbooks/${id}`).then((r) => r.data);
+export const executePlaybook = (id, data = {}) =>
+  client.post(`/playbooks/${id}/execute`, data).then((r) => r.data);
+
+export const getPlaybookExecutions = (params = {}) =>
+  client.get("/playbook-executions", { params }).then((r) => r.data);
+export const getPlaybookExecution = (id) =>
+  client.get(`/playbook-executions/${id}`).then((r) => r.data);
+export const approveExecution = (id) =>
+  client.post(`/playbook-executions/${id}/approve`).then((r) => r.data);
+export const rejectExecution = (id, reason) =>
+  client.post(`/playbook-executions/${id}/reject`, { reason }).then((r) => r.data);
+export const cancelExecution = (id) =>
+  client.post(`/playbook-executions/${id}/cancel`).then((r) => r.data);
+
 export default client;

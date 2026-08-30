@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAlerts, updateAlert, runDetection, getMlStatus, trainModel } from "../api/client";
 import { usePermissions } from "../context/PermissionContext.jsx";
+import { useRealtime } from "../hooks/useRealtime.js";
 import EnrichmentPanel from "../components/EnrichmentPanel.jsx";
 
 const SEVERITY_COLORS = { info: "#4f8cff", warning: "#f5a623", critical: "#e6493d" };
@@ -70,6 +71,13 @@ export default function Alerts() {
       queryClient.invalidateQueries({ queryKey: ["ml-status"] });
     },
   });
+
+  // New/changed alerts can shift which rows belong in the currently
+  // selected status filter, so this invalidates rather than patching the
+  // cache directly (Part 14's guidance for relationship-sensitive updates).
+  const invalidateAlerts = () => queryClient.invalidateQueries({ queryKey: ["alerts"] });
+  useRealtime("alert.created", invalidateAlerts);
+  useRealtime("alert.updated", invalidateAlerts);
 
   return (
     <div>

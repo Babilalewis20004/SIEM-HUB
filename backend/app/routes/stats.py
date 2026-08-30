@@ -4,7 +4,10 @@ from flask import Blueprint, request, jsonify
 from sqlalchemy import func
 
 from app import db
-from app.models import Event, Alert
+from app.models import Event, Alert, Incident
+from app.models.ioc import IOC, IOCMatch
+from app.playbooks.models import PlaybookExecution
+from app.services.correlation import CORRELATABLE_STATUSES
 from app.auth.authorization import require_permission
 from app.auth.permissions import EVENTS_READ
 
@@ -16,6 +19,22 @@ stats_bp = Blueprint("stats", __name__)
 def summary():
     total_events = Event.query.count()
     open_alerts = Alert.query.filter_by(status="open").count()
+
+    # Live SOC dashboard tiles (Part 15) -- the REST snapshot a page load
+    # starts from; WebSocket events keep these fresh without a refetch.
+    active_incidents = Incident.query.filter(Incident.status.in_(CORRELATABLE_STATUSES)).count()
+    critical_alerts = Alert.query.filter_by(status="open", severity="critical").count()
+    events_last_minute = Event.query.filter(
+        Event.timestamp >= datetime.utcnow() - timedelta(minutes=1)
+    ).count()
+    high_risk_ioc_matches = (
+        IOCMatch.query.join(IOC, IOCMatch.ioc_id == IOC.id)
+        .filter(IOC.threat_level.in_(["high", "critical"]))
+        .count()
+    )
+    playbooks_running = PlaybookExecution.query.filter(
+        PlaybookExecution.status.in_(["running", "awaiting_approval"])
+    ).count()
 
     severity_counts = dict(
         db.session.query(Event.severity, func.count(Event.id)).group_by(Event.severity).all()
@@ -58,6 +77,12 @@ def summary():
         "events_by_outcome": outcome_counts,
         "alert_severity_counts": alert_severity_counts,
         "top_source_ips": [{"ip": ip, "count": c} for ip, c in top_sources],
+
+        "active_incidents": active_incidents,
+        "critical_alerts": critical_alerts,
+        "events_per_minute": events_last_minute,
+        "high_risk_ioc_matches": high_risk_ioc_matches,
+        "playbooks_running": playbooks_running,
     })
 
 

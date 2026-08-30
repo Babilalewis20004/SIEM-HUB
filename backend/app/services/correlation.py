@@ -19,8 +19,9 @@ from datetime import timedelta
 from flask import current_app
 
 from app import db
-from app.models import Incident
+from app.models import Incident, Alert
 from app.models.ioc import IOCMatch
+from app.events import bus
 from app.services.incidents import severity_for_alert, priority_for_severity
 
 SCORE_SOURCE_IP = 40
@@ -153,6 +154,12 @@ def _attach(alert, incident, score, reasons, event):
 
     db.session.add(incident)
     db.session.add(alert)
+    db.session.flush()
+
+    bus.publish("incident.updated", {
+        "id": incident.id, "title": incident.title, "severity": incident.severity,
+        "status": incident.status, "alert_count": Alert.query.filter_by(incident_id=incident.id).count(),
+    })
 
 
 def _create_incident(alert):
@@ -176,5 +183,10 @@ def _create_incident(alert):
     alert.context = ctx
     alert.incident_id = incident.id
     db.session.add(alert)
+
+    bus.publish("incident.created", {
+        "incident_id": incident.id, "title": incident.title, "severity": incident.severity,
+        "status": incident.status, "alert_count": 1,
+    })
 
     return incident

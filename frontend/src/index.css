@@ -540,3 +540,95 @@ body {
   font-size: 12px;
   padding: 10px;
 }
+
+/* Shared by any panel showing a label/value list (incident summary,
+   playbook detail, approval queue), not just the event detail page. */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  row-gap: 8px;
+  column-gap: 12px;
+  margin: 12px 0;
+  font-size: 14px;
+}
+
+.detail-grid dt { color: var(--muted); }
+.detail-grid dd { margin: 0; }
+
+/* --- Real-time SOC: connection status, live feed, playbook activity --- */
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.connection-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.status-live .connection-dot { background: #3cc878; }
+.status-reconnecting .connection-dot { background: var(--warning); }
+.status-offline .connection-dot { background: var(--critical); }
+
+.live-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.live-feed-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.live-feed-time {
+  color: var(--muted);
+  font-family: monospace;
+  font-size: 12px;
+  min-width: 76px;
+}
+
+.live-feed-title { flex: 1; }
+.live-feed-detail { color: var(--muted); font-size: 12px; }
+
+.playbook-activity-item {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.playbook-activity-item:last-child { border-bottom: none; }
+
+.playbook-activity-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.playbook-step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.playbook-step-list li { color: var(--text); }
+.playbook-step-list .step-icon { display: inline-block; width: 16px; }
+.playbook-step-list em { color: var(--warning); font-style: normal; margin-left: 4px; }

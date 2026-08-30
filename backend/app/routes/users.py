@@ -4,6 +4,7 @@ from app import db
 from app.models import User
 from app.auth.permissions import ROLES, USERS_READ, USERS_MANAGE
 from app.auth.authorization import require_permission
+from app.events import bus
 from app.services.audit import log_action
 
 users_bp = Blueprint("users", __name__)
@@ -70,6 +71,7 @@ def update_role(user_id):
     log_action(g.current_user, "user.role_changed", "user", user.id,
                {"from": old_role, "to": new_role})
     db.session.commit()
+    bus.publish("user.role_changed", {"user_id": user.id, "from": old_role, "to": new_role})
     return jsonify(user.to_dict())
 
 
@@ -91,4 +93,6 @@ def update_status(user_id):
     user.is_active = new_status
     log_action(g.current_user, "user.status_changed", "user", user.id, {"is_active": new_status})
     db.session.commit()
+    if not new_status:
+        bus.publish("user.disabled", {"user_id": user.id})
     return jsonify(user.to_dict())

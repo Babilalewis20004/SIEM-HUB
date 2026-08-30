@@ -3,11 +3,23 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_apscheduler import APScheduler
+from flask_socketio import SocketIO
 from config import Config
 
 db = SQLAlchemy()
 migrate = Migrate()
 scheduler = APScheduler()
+# threading async mode: this app is a single Flask process (no gunicorn/
+# multiple workers, no Redis) already running APScheduler on background
+# threads -- eventlet/gevent would monkey-patch the whole process for no
+# benefit here and has flakier Windows support. If this ever moves behind
+# multiple worker processes, Flask-SocketIO's message_queue= (Redis-backed)
+# is the documented upgrade path, not a rewrite of this module.
+# manage_session=False: this app has no Flask cookie-session (auth is JWT
+# only, carried in the connect handshake's `auth` payload -- see
+# app/ws/handlers.py), and Flask-SocketIO's session-management code path is
+# incompatible with Flask 3.1's read-only RequestContext.session property.
+socketio = SocketIO(async_mode="threading", manage_session=False)
 
 
 def create_app(config_class=Config):
@@ -17,6 +29,7 @@ def create_app(config_class=Config):
     db.init_app(app)
     migrate.init_app(app, db)
     CORS(app, resources={r"/api/*": {"origins": app.config.get("CORS_ORIGINS", "*")}})
+    socketio.init_app(app, cors_allowed_origins=app.config.get("CORS_ORIGINS", "*"))
 
     # Blueprints
     from app.routes.auth import auth_bp
@@ -29,6 +42,7 @@ def create_app(config_class=Config):
     from app.routes.audit import audit_bp
     from app.routes.iocs import iocs_bp
     from app.routes.mitre import mitre_bp
+    from app.routes.playbooks import playbooks_bp, playbook_executions_bp
     from app.utils.auth import require_auth_before_request
 
     # Every route except /api/auth/* requires a valid JWT. Registered on the
@@ -39,6 +53,7 @@ def create_app(config_class=Config):
     # applied per-route via @require_permission, not here.
     protected_blueprints = {
         "logs", "alerts", "stats", "rules", "users", "incidents", "audit", "iocs", "mitre",
+        "playbooks", "playbook_executions",
     }
     if app.config.get("REQUIRE_AUTH", True):
         @app.before_request
@@ -56,6 +71,22 @@ def create_app(config_class=Config):
     app.register_blueprint(audit_bp, url_prefix="/api/audit-log")
     app.register_blueprint(iocs_bp, url_prefix="/api/iocs")
     app.register_blueprint(mitre_bp, url_prefix="/api/mitre")
+    app.register_blueprint(playbooks_bp, url_prefix="/api/playbooks")
+    app.register_blueprint(playbook_executions_bp, url_prefix="/api/playbook-executions")
+
+    # Real-time event bus wiring: bus.reset() first because create_app() can
+    # run more than once per process (e.g. once per test), and the bus is a
+    # plain module-level dict -- without resetting, a second app instance's
+    # handlers would pile up alongside the first's (whose socketio_instance/
+    # app have since been torn down).
+    from app.events import bus, broadcaster
+    from app.ws.handlers import register_handlers
+    from app.playbooks.triggers import register_triggers
+
+    bus.reset()
+    broadcaster.init_app(socketio)
+    register_triggers()
+    register_handlers(socketio)
 
     # Background anomaly detection scheduler
     if not scheduler.running and app.config.get("ENABLE_SCHEDULER", True):

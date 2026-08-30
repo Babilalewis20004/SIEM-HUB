@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { PermissionProvider, usePermissions } from "./context/PermissionContext.jsx";
+import { RealtimeProvider } from "./context/RealtimeContext.jsx";
+import ConnectionStatus from "./components/ConnectionStatus.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Alerts from "./pages/Alerts.jsx";
 import Logs from "./pages/Logs.jsx";
@@ -8,6 +10,9 @@ import Incidents from "./pages/Incidents.jsx";
 import IncidentDetail from "./pages/IncidentDetail.jsx";
 import Users from "./pages/Users.jsx";
 import IOCs from "./pages/IOCs.jsx";
+import Playbooks from "./pages/Playbooks.jsx";
+import PlaybookDetail from "./pages/PlaybookDetail.jsx";
+import Approvals from "./pages/Approvals.jsx";
 import Login from "./pages/Login.jsx";
 
 function RequirePermission({ permission, children }) {
@@ -39,9 +44,12 @@ function AppShell() {
         <NavLink to="/logs" className="nav-link">Logs</NavLink>
         <NavLink to="/incidents" className="nav-link">Incidents</NavLink>
         {can("iocs.read") && <NavLink to="/iocs" className="nav-link">Threat Intel</NavLink>}
+        {can("playbooks.read") && <NavLink to="/playbooks" className="nav-link">Playbooks</NavLink>}
+        {can("playbooks.approve") && <NavLink to="/approvals" className="nav-link">Approvals</NavLink>}
         {can("users.manage") && <NavLink to="/users" className="nav-link">Users</NavLink>}
 
         <div className="sidebar-footer">
+          <ConnectionStatus />
           <div className="user-chip">
             <span className="user-email">{user.email}</span>
             <span className="user-role">{user.role}</span>
@@ -72,6 +80,30 @@ function AppShell() {
               </RequirePermission>
             }
           />
+          <Route
+            path="/playbooks"
+            element={
+              <RequirePermission permission="playbooks.read">
+                <Playbooks />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/playbooks/:id"
+            element={
+              <RequirePermission permission="playbooks.read">
+                <PlaybookDetail />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/approvals"
+            element={
+              <RequirePermission permission="playbooks.approve">
+                <Approvals />
+              </RequirePermission>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -83,9 +115,11 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <PermissionProvider>
-          <AppShell />
-        </PermissionProvider>
+        <RealtimeProvider>
+          <PermissionProvider>
+            <AppShell />
+          </PermissionProvider>
+        </RealtimeProvider>
       </AuthProvider>
     </BrowserRouter>
   );

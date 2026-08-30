@@ -40,6 +40,12 @@ class Incident(db.Model):
     resolved_by = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=True)
     resolved_at = db.Column(db.DateTime, nullable=True)
 
+    # Free-form labels, e.g. added by a playbook's add_incident_tag action
+    # or a human. Simple JSON list -- matches the Event.parsed_fields /
+    # Rule.condition JSON-column convention rather than a many-to-many table,
+    # since tags here don't need cross-incident reuse/filtering yet.
+    tags = db.Column(db.JSON, default=list)
+
     alerts = db.relationship("Alert", backref="incident", lazy=True)
     notes = db.relationship(
         "IncidentNote", backref="incident", lazy=True,
@@ -84,6 +90,7 @@ class Incident(db.Model):
             "created_by": self.created_by,
             "resolved_by": self.resolved_by,
             "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+            "tags": self.tags or [],
             "alert_count": len(self.alerts),
             "enrichment_summary": self.enrichment_summary(),
         }
@@ -99,7 +106,11 @@ class IncidentNote(db.Model):
 
     id = db.Column(db.String(36), primary_key=True, default=gen_uuid)
     incident_id = db.Column(db.String(36), db.ForeignKey("incidents.id"), nullable=False, index=True)
-    author_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False)
+    # Nullable: a playbook's create_case_note action has no human author when
+    # it runs unattended (an automatic alert/incident trigger, not a person
+    # clicking "execute") -- null means "system/playbook", same convention
+    # AuditLog.actor_id already uses for system actions.
+    author_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=True)
 
     content = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

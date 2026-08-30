@@ -48,11 +48,14 @@ def _extract_token():
     return header.split(" ", 1)[1].strip()
 
 
-def get_current_user():
-    """Decode the request's token and return the User, or raise AuthError."""
-    token = _extract_token()
+def user_from_token(token: str) -> User:
+    """Decode `token` and return the live User it names, or raise AuthError.
+    Shared by the REST auth path (get_current_user, below) and the
+    WebSocket connect handler (app/ws/handlers.py) so both enforce the exact
+    same checks -- token validity, user existence, and enabled status --
+    from one place."""
     if not token:
-        raise AuthError("Missing Authorization header.")
+        raise AuthError("Missing token.")
     payload = decode_token(token)
     user = User.query.get(payload["sub"])
     if not user:
@@ -60,6 +63,14 @@ def get_current_user():
     if not user.is_active:
         raise AuthError("Account disabled.", 403)
     return user
+
+
+def get_current_user():
+    """Decode the request's token and return the User, or raise AuthError."""
+    token = _extract_token()
+    if not token:
+        raise AuthError("Missing Authorization header.")
+    return user_from_token(token)
 
 
 def require_auth(f):

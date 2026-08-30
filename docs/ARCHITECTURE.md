@@ -395,3 +395,217 @@ delete, import, enable, disable — is admin-only; analyst and viewer get
 `iocs.read`). IOC/MITRE mutations are audited the same way as everything
 else — `ioc.created`, `ioc.updated`, `ioc.enabled`, `ioc.disabled`,
 `ioc.deleted`, `ioc.imported`, `rule.mitre_mapping_changed`.
+
+# Real-time SOC operations + playbooks
+
+## Why this exists
+
+Every prior milestone was request/response: an analyst had to reload a page
+to see a new alert, and there was no automated response beyond detection
+itself. This milestone adds two things on top of the unchanged detection ->
+enrichment -> correlation -> incident pipeline:
+
+1. **Real-time push** — connected analysts see new alerts/incidents and
+   playbook progress without polling (the existing 15s React Query poll
+   stays as a fallback, not a replacement).
+2. **Playbooks** — declarative, validated automation that can react to an
+   alert/incident and run a fixed set of registered actions, with
+   high-risk actions gated behind human approval.
+
+No Redis, no Celery, no Kafka: this is still a single Flask process on
+SQLite (see the WebSocket section below for exactly why that's sufficient
+here, and the specific upgrade path if it stops being sufficient).
+
+## Event bus -> WebSocket architecture
+
+```text
+Detection / Correlation / Incident routes / Playbook engine
+                    |
+                    v
+       app/events/bus.py (publish/subscribe, in-process, synchronous)
+                    |
+                    v
+     app/events/broadcaster.py (the only module that imports flask_socketio
+                                 outside of app/ws/handlers.py)
+                    |
+                    v
+              socketio.emit(event_type, envelope, room=...)
+                    |
+                    v
+         React RealtimeContext -> useRealtime(eventType, handler)
+```
+
+`app/events/bus.py` is a plain module-level `dict[event_type] -> [handlers]`
+— no Redis. Detection/correlation/playbook code never imports
+`flask_socketio`; it calls `bus.publish(event_type, data)` and moves on.
+A subscriber's exception is caught and logged, never propagated — a broken
+WebSocket broadcast or playbook trigger can't take down detection. Every
+publish is wrapped in a small envelope (`{event_type, timestamp, data}`);
+`data` is always a hand-built dict of a few primitive fields, never a raw
+`model.to_dict()` — WebSocket messages mean "something changed," REST
+remains the source of the full record (Part W's rule).
+
+`create_app()` calls `bus.reset()` before wiring the broadcaster and the
+playbook triggers (`app/playbooks/triggers.py`) every time it runs — it can
+run more than once per process (once per pytest test), and without
+resetting first, a second app instance's handlers would pile up alongside
+the first's now-torn-down `socketio`/`app` references.
+
+**WebSocket auth**: `app/ws/handlers.py`'s `connect` handler validates the
+JWT passed in Socket.IO's `auth` payload via
+`app.utils.auth.user_from_token()` — the exact same check
+(`decode_token` -> `User.query.get` -> `is_active`) the REST path's
+`get_current_user()` uses, factored out so both enforce identical rules. A
+missing/invalid/expired token or a disabled user gets the connection
+refused (`return False` from the handler) before it ever joins a room — no
+privileged data reaches a socket that failed auth, even momentarily.
+Every connect/reject is audited (`websocket.authenticated` /
+`websocket.rejected`) through the same `log_action()` every other
+security-sensitive mutation uses.
+
+**Rooms**: every authenticated connection joins `"authenticated"`
+(everything visible over REST to any role with `*_READ` gets broadcast
+here) plus `role:<role>` and `user:<id>` for future narrower targeting.
+`app/events/broadcaster.py`'s `ADMIN_ONLY_EVENTS` set
+(`user.role_changed`, `user.disabled`, `system.configuration_changed`)
+broadcasts to `role:admin` only — WebSocket authentication alone is not
+treated as sufficient authorization for these.
+
+**Why threading async mode, not eventlet/gevent**: this app already runs
+Flask-APScheduler on background threads in the same process; eventlet/
+gevent would monkey-patch the entire process (sockets, threading, SSL) for
+no benefit here and has materially flakier Windows support. If this app
+is ever deployed behind multiple worker processes (gunicorn `-w N`),
+Flask-SocketIO's `message_queue=` (Redis-backed pub/sub across workers) is
+the documented upgrade path — a config change, not a rewrite of
+`app/events/bus.py` or `app/playbooks/`.
+
+**Known limitation**: Werkzeug's built-in development server (used by
+`socketio.run()` for local dev) does not properly complete a raw WebSocket
+transport *upgrade* under threading mode — the upgrade attempt logs a
+500/`ConnectionError` in `simple_websocket`'s Werkzeug integration.
+Socket.IO's transport-negotiation design means this is invisible to a
+user: `socket.io-client` (browser or Node) falls back to and stays
+reliably on HTTP long-polling, which carries every event correctly — this
+was verified live by connecting a real client, forcing polling-only
+transport, and confirming `alert.created`/`incident.updated`/every
+`playbook.*` event arrived during a real detection run. A production
+deployment behind gunicorn+eventlet (or gevent) would support the true
+WebSocket upgrade; this is a dev-server-only rough edge, not a design flaw.
+
+## Playbook engine
+
+```text
+Alert / Incident created
+         |
+         v
+app/playbooks/triggers.py     -- subscribes to alert.created / incident.created /
+                                  incident.status_changed on the bus, matches
+                                  enabled Playbooks by trigger_type + trigger_condition
+         |
+         v
+   PlaybookExecution created (status=pending) + committed
+         |
+         v
+app/playbooks/engine.start_execution_async()  -- socketio.start_background_task
+         |
+         v
+app/playbooks/engine.run()    -- opens its OWN app context (the calling thread
+                                  has none); walks playbook.steps in order
+         |
+    for each step:
+         |
+         +-- condition false?           -> skip silently
+         +-- already logged for this   -> audit-only "skipped_duplicate",
+         |   (scope, action, target)?      never re-executes (idempotency)
+         +-- risk high/critical, or    -> PlaybookApproval row created,
+         |   step opts in explicitly?     execution parks at awaiting_approval
+         +-- otherwise                 -> action runs, PlaybookActionLog written
+```
+
+**Action registry** (`app/playbooks/registry.py`) is the *only* place a
+step's `action` string resolves to code — a static
+`dict[name] -> ActionSpec(fn, required_parameters, risk_level,
+requires_approval, external)`. `app/playbooks/validators.py` rejects any
+step naming an action not in this dict, or missing a required parameter,
+before a Playbook is ever stored. There is no `importlib`/`getattr(module,
+user_input)` anywhere in this package — an attacker (or a careless
+playbook author) cannot smuggle arbitrary code through a step, only a
+name this file already knows and a parameter dict the target action
+already declared it needs.
+
+**Approval floor is server-side, not playbook-side**: `engine._run_step()`
+computes `needs_approval = spec.risk_level in ("high", "critical") or
+step.get("approval_required")` — a step can opt a low-risk action *into*
+approval, but can never opt a high/critical action *out* of it by setting
+`approval_required: false`. Separation of duties (a person can never
+approve their own request) is enforced in the approve/reject routes
+(`app/routes/playbooks.py`), not just by RBAC — `PLAYBOOKS_APPROVE` says
+"you may approve," the route additionally checks
+`execution.triggered_by != current_user.id`. An automatic (alert/incident)
+trigger has `triggered_by = None`, so there's no requester to conflict
+with.
+
+**Idempotency**: `playbook_action_logs` has a DB unique constraint on
+`(scope_key, action, target)` — `scope_key` is the incident/alert id,
+`target` is whichever single parameter makes an action's *effect* unique
+(the IP for `block_ip`, the tag for `add_incident_tag`, etc.; actions with
+no natural dedup key, like `notify_analyst`, are never deduplicated). The
+engine pre-checks for an existing row before running a step (fast path)
+and catches the `IntegrityError` if two executions race to insert the same
+triple simultaneously (the DB constraint is the authoritative backstop,
+not the pre-check). **Known limitation**: because the constraint doesn't
+distinguish `status`, a *failed* attempt permanently occupies that triple
+— a genuinely failed high-risk action is not auto-retried by design (a
+SIEM silently retrying `block_ip` after a failure is its own hazard); a
+fresh manual investigation or a new incident tag/note is the intended
+path, not blind retry.
+
+**Response providers**: `block_ip` / `disable_user` / `kill_process` /
+`isolate_host` are the only actions with `external=True` in the registry
+— they never touch `db.session` (so it's safe to run them off the
+engine's own thread) and go through `app/playbooks/providers.py`'s
+`ResponseProvider` interface, currently only `MockResponseProvider`, which
+records a structured "would have done X" result and never reaches a real
+network device, OS, or user record. `engine._run_step()` wraps only these
+four in a `ThreadPoolExecutor(...).result(timeout=...)` — every other
+(local, DB-touching) action runs directly on the engine's own thread/
+session, since handing a Flask-SQLAlchemy-session-touching call to a
+second thread would hand it a *different*, uncommitted session.
+
+**A real bug this surfaced**: `app/services/audit.py`'s `log_action()`
+originally read `request.remote_addr` unconditionally. Every caller that
+existed before this milestone (routes, and `app/ws/handlers.py`'s
+connect/disconnect handlers — Flask-SocketIO pushes a request context per
+event) had one. `engine.run()`'s background thread does not — only an app
+context. The result in production was silent: the exception propagated
+out of the bare background thread, uncaught, leaving the
+`PlaybookExecution` stuck at `status="running"` forever with no logged
+error. `pytest-flask`'s autouse `_push_request_context` fixture pushes a
+request context onto the *main test thread* for every test, which is
+exactly why the pre-existing test suite never caught this — the fix
+(`ip_address=request.remote_addr if has_request_context() else None`) and
+a regression test that reproduces the bug from a real background thread
+(bypassing that autouse fixture) are in `tests/test_audit.py`. This is the
+canonical reason this milestone's manual/live verification (Part Z) is not
+optional: it found a bug the unit test suite structurally could not.
+
+## RBAC (playbooks)
+
+Four new permissions: `playbooks.read` (all roles), `playbooks.manage`
+(create/edit/delete playbook definitions — admin only),
+`playbooks.execute` (run a low-risk playbook, or request a high-risk one —
+admin + analyst), `playbooks.approve` (admin only, subject to the
+separation-of-duties check above). `PLAYBOOKS_MANAGE` and
+`PLAYBOOKS_EXECUTE` are deliberately separate so a policy change to one
+can never silently grant the other.
+
+## Default playbooks
+
+Seeded by `seed.py` (same idempotent "insert if the name doesn't already
+exist" pattern as its rules/MITRE/IOC seeding): *SSH Brute Force Response*
+(alert-triggered on `rule_name == brute_force_ssh`; tag + note + notify,
+no external action), *Malicious IOC Investigation* (alert-triggered on
+`ioc_match == true`; tag + note + notify + a `block_ip` step that always
+parks for approval), *Critical Incident Notification*
+(incident-triggered on `severity == critical`; notify + note).

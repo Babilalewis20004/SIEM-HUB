@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify, g
 
 from app import db
 from app.models import Alert
+from app.events import bus
 from app.services.detection import run_detection_job
 from app.services import ml_detection
 from app.services.audit import log_action
@@ -68,6 +69,9 @@ def update_alert(alert_id):
         alert.status = new_status
 
     db.session.commit()
+    bus.publish("alert.updated", {
+        "alert_id": alert.id, "status": alert.status, "updated_by": g.current_user.id,
+    })
     return jsonify(alert.to_dict())
 
 

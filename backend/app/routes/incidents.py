@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify, g
 
 from app import db
 from app.models import Incident, IncidentNote, Alert, Event, User
+from app.events import bus
 from app.services.incidents import transition_status, InvalidTransition
 from app.services.audit import log_action
 from app.auth.authorization import require_permission
@@ -99,6 +100,10 @@ def create_incident():
     db.session.flush()
     log_action(g.current_user, "incident.created", "incident", incident.id, {"title": incident.title})
     db.session.commit()
+    bus.publish("incident.created", {
+        "incident_id": incident.id, "title": incident.title, "severity": incident.severity,
+        "status": incident.status, "alert_count": 0,
+    })
     return jsonify(incident.to_dict()), 201
 
 
@@ -114,6 +119,9 @@ def update_incident(incident_id):
 
     log_action(g.current_user, "incident.updated", "incident", incident.id, {"fields": list(data.keys())})
     db.session.commit()
+    bus.publish("incident.updated", {
+        "id": incident.id, "title": incident.title, "severity": incident.severity, "status": incident.status,
+    })
     return jsonify(incident.to_dict())
 
 
@@ -134,6 +142,7 @@ def assign_incident(incident_id):
     incident.assigned_to = assignee_id or None
     log_action(g.current_user, "incident.assigned", "incident", incident.id, {"assigned_to": assignee_id})
     db.session.commit()
+    bus.publish("incident.assigned", {"incident_id": incident.id, "assigned_to": assignee_id})
     return jsonify(incident.to_dict())
 
 
@@ -160,6 +169,9 @@ def set_incident_status(incident_id):
     log_action(g.current_user, "incident.status_changed", "incident", incident.id,
                {"to": new_status, "reopen": reopen})
     db.session.commit()
+    bus.publish("incident.status_changed", {
+        "incident_id": incident.id, "status": incident.status, "changed_by": g.current_user.id,
+    })
     return jsonify(incident.to_dict())
 
 
@@ -176,4 +188,7 @@ def add_note(incident_id):
     db.session.add(note)
     log_action(g.current_user, "incident.note_added", "incident", incident.id)
     db.session.commit()
+    bus.publish("incident.note_added", {
+        "incident_id": incident.id, "note_id": note.id, "author_id": note.author_id,
+    })
     return jsonify(note.to_dict()), 201

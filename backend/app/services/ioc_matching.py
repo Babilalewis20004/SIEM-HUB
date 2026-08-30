@@ -14,6 +14,7 @@ from datetime import datetime
 
 from app import db
 from app.models.ioc import IOC, IOCMatch
+from app.events import bus
 from app.services.ioc_normalization import normalize_ip, normalize_domain, normalize_url
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,12 @@ def enrich_alert_iocs(alert):
 
         ioc.last_seen_at = datetime.utcnow()
         db.session.add(ioc)
+
+        if ioc.threat_level in ("high", "critical"):
+            bus.publish("ioc.match", {
+                "alert_id": alert.id, "indicator": ioc.indicator, "indicator_type": ioc.indicator_type,
+                "threat_level": ioc.threat_level, "confidence": ioc.confidence,
+            })
 
     if created:
         db.session.flush()
