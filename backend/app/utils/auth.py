@@ -57,6 +57,8 @@ def get_current_user():
     user = User.query.get(payload["sub"])
     if not user:
         raise AuthError("User no longer exists.")
+    if not user.is_active:
+        raise AuthError("Account disabled.", 403)
     return user
 
 

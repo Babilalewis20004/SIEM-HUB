@@ -50,3 +50,7 @@ class Config:
     ML_CONTAMINATION = 0.05              # expected proportion of anomalous buckets
     ML_SCORE_LOOKBACK_MINUTES = 15       # how far back to score on each detection pass
     ML_SCORING_ENABLED = True            # scheduler scores automatically once a model exists
+
+    # Alert correlation (app/services/correlation.py) tuning
+    CORRELATION_TIME_WINDOW_MINUTES = 15   # alerts within this window of each other may correlate
+    CORRELATION_SCORE_THRESHOLD = 50       # minimum score (see correlation.py SCORE_*) to attach to an incident

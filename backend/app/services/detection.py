@@ -16,6 +16,7 @@ from collections import defaultdict
 
 from app import db
 from app.models import Event, Alert, Rule
+from app.services import correlation
 
 
 def run_detection_job():
@@ -63,12 +64,20 @@ def _run_threshold_rules():
                 alert = Alert(
                     event_id=group_events[-1].id,
                     rule_name=rule.name,
+                    rule_id=rule.id,
+                    title=rule.name,
                     severity=rule.severity,
                     description=f"{rule.name}: {len(group_events)} matching events from '{key}' "
                                  f"in {window_seconds}s (threshold {count_needed})",
+                    detection_source="rule",
+                    mitre_tactic=rule.mitre_tactic,
+                    mitre_technique=rule.mitre_technique,
+                    mitre_subtechnique=rule.mitre_subtechnique,
                     context={"group_key": str(key), "count": len(group_events), "group_by": group_by},
                 )
                 db.session.add(alert)
+                db.session.flush()
+                correlation.correlate_alert(alert)
 
 
 def _run_offhours_heuristic(start_hour=0, end_hour=5):
@@ -86,13 +95,16 @@ def _run_offhours_heuristic(start_hour=0, end_hour=5):
             existing = Alert.query.filter_by(rule_name="off_hours_login", event_id=event.id).first()
             if existing:
                 continue
-            db.session.add(
-                Alert(
-                    event_id=event.id,
-                    rule_name="off_hours_login",
-                    severity="info",
-                    description=f"Login activity from {event.source_ip or 'unknown IP'} during off-hours "
-                                 f"({event.timestamp.strftime('%H:%M')})",
-                    context={"source_ip": event.source_ip, "hour": hour},
-                )
+            alert = Alert(
+                event_id=event.id,
+                rule_name="off_hours_login",
+                title="Off-hours login",
+                severity="info",
+                description=f"Login activity from {event.source_ip or 'unknown IP'} during off-hours "
+                             f"({event.timestamp.strftime('%H:%M')})",
+                detection_source="statistical",
+                context={"source_ip": event.source_ip, "hour": hour},
             )
+            db.session.add(alert)
+            db.session.flush()
+            correlation.correlate_alert(alert)

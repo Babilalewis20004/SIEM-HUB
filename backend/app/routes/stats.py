@@ -5,11 +5,14 @@ from sqlalchemy import func
 
 from app import db
 from app.models import Event, Alert
+from app.auth.authorization import require_permission
+from app.auth.permissions import EVENTS_READ
 
 stats_bp = Blueprint("stats", __name__)
 
 
 @stats_bp.route("/summary", methods=["GET"])
+@require_permission(EVENTS_READ)
 def summary():
     total_events = Event.query.count()
     open_alerts = Alert.query.filter_by(status="open").count()
@@ -59,6 +62,7 @@ def summary():
 
 
 @stats_bp.route("/timeseries", methods=["GET"])
+@require_permission(EVENTS_READ)
 def timeseries():
     """Bucketed event counts for charting. Default: last 24h, hourly buckets."""
     hours = int(request.args.get("hours", 24))

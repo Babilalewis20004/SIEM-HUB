@@ -25,6 +25,12 @@ class Rule(db.Model):
     severity = db.Column(db.String(16), default="warning")
     enabled = db.Column(db.Boolean, default=True)
 
+    # MITRE ATT&CK mapping (see app/models/alert.py for the denormalised
+    # per-alert copy captured at detection time).
+    mitre_tactic = db.Column(db.String(128), nullable=True)
+    mitre_technique = db.Column(db.String(16), nullable=True)      # e.g. "T1110"
+    mitre_subtechnique = db.Column(db.String(16), nullable=True)   # e.g. "T1110.001"
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -36,6 +42,9 @@ class Rule(db.Model):
             "condition": self.condition or {},
             "severity": self.severity,
             "enabled": self.enabled,
+            "mitre_tactic": self.mitre_tactic,
+            "mitre_technique": self.mitre_technique,
+            "mitre_subtechnique": self.mitre_subtechnique,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

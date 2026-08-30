@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAlerts, updateAlert, runDetection, getMlStatus, trainModel } from "../api/client";
+import { usePermissions } from "../context/PermissionContext.jsx";
 
 const SEVERITY_COLORS = { info: "#4f8cff", warning: "#f5a623", critical: "#e6493d" };
 
 function MlPanel() {
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
   const { data: mlStatus } = useQuery({ queryKey: ["ml-status"], queryFn: getMlStatus });
 
@@ -17,9 +20,11 @@ function MlPanel() {
     <div className="panel">
       <div className="page-header">
         <h3>ML Anomaly Detection (Isolation Forest)</h3>
-        <button onClick={() => trainMutation.mutate()} disabled={trainMutation.isPending}>
-          {trainMutation.isPending ? "Training…" : mlStatus?.trained ? "Retrain Model" : "Train Model"}
-        </button>
+        {can("ml.train") && (
+          <button onClick={() => trainMutation.mutate()} disabled={trainMutation.isPending}>
+            {trainMutation.isPending ? "Training…" : mlStatus?.trained ? "Retrain Model" : "Train Model"}
+          </button>
+        )}
       </div>
 
       {mlStatus?.trained ? (
@@ -30,9 +35,7 @@ function MlPanel() {
         </p>
       ) : (
         <p className="ml-status-line">
-          No model trained yet. Ingest some logs, then click "Train Model" to learn a
-          baseline of normal traffic per source IP — new alerts will flag activity that
-          doesn't fit that baseline.
+          No model trained yet.{can("ml.train") && " Ingest some logs, then click \"Train Model\" to learn a baseline of normal traffic per source IP — new alerts will flag activity that doesn't fit that baseline."}
         </p>
       )}
 
@@ -45,6 +48,7 @@ function MlPanel() {
 
 export default function Alerts() {
   const [status, setStatus] = useState("open");
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -69,9 +73,11 @@ export default function Alerts() {
     <div>
       <div className="page-header">
         <h2>Alerts</h2>
-        <button onClick={() => detectionMutation.mutate()} disabled={detectionMutation.isPending}>
-          {detectionMutation.isPending ? "Running…" : "Run Detection Now"}
-        </button>
+        {can("detection.run") && (
+          <button onClick={() => detectionMutation.mutate()} disabled={detectionMutation.isPending}>
+            {detectionMutation.isPending ? "Running…" : "Run Detection Now"}
+          </button>
+        )}
       </div>
 
       <MlPanel />
@@ -99,7 +105,7 @@ export default function Alerts() {
           </thead>
           <tbody>
             {(data?.items ?? []).map((alert) => {
-              const isMl = alert.rule_name === "ml_isolation_forest";
+              const isMl = alert.detection_source === "ml";
               return (
                 <tr key={alert.id}>
                   <td>
@@ -111,23 +117,37 @@ export default function Alerts() {
                   </td>
                   <td>
                     {isMl && <span className="ml-badge">ML</span>}
-                    {alert.rule_name}
+                    {alert.title || alert.rule_name}
+                    {alert.mitre_technique && <span className="mitre-badge">{alert.mitre_technique}</span>}
                   </td>
                   <td>
                     {alert.description}
-                    {isMl && alert.context?.anomaly_score !== undefined && (
-                      <div className="ml-score">score: {alert.context.anomaly_score}</div>
+                    {isMl && alert.anomaly_score !== null && alert.anomaly_score !== undefined && (
+                      <div className="ml-score">score: {alert.anomaly_score}</div>
                     )}
                   </td>
                   <td>{new Date(alert.created_at).toLocaleString()}</td>
                   <td>{alert.status}</td>
-                  <td>
-                    {alert.status !== "resolved" && (
+                  <td className="row-actions">
+                    {alert.status === "open" && can("alerts.acknowledge") && (
+                      <button
+                        onClick={() => mutation.mutate({ id: alert.id, data: { status: "acknowledged" } })}
+                      >
+                        Acknowledge
+                      </button>
+                    )}
+                    {alert.status !== "resolved" && can("alerts.resolve") && (
                       <button
                         onClick={() => mutation.mutate({ id: alert.id, data: { status: "resolved" } })}
                       >
                         Resolve
                       </button>
+                    )}
+                    {alert.incident_id && (
+                      <Link to={`/incidents/${alert.incident_id}`}>View Incident</Link>
+                    )}
+                    {alert.event_id && (
+                      <Link to={`/logs?event=${alert.event_id}`}>View Event</Link>
                     )}
                   </td>
                 </tr>

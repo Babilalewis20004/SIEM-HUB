@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getLogs, uploadLogs } from "../api/client";
+import { getLogs, getLog, uploadLogs } from "../api/client";
+import { usePermissions } from "../context/PermissionContext.jsx";
 
 const SEVERITY_COLORS = {
   info: "#4f8cff",
@@ -52,7 +54,18 @@ export default function Logs() {
   const [severity, setSeverity] = useState("");
   const [file, setFile] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [searchParams] = useSearchParams();
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
+
+  // Deep link from Alerts/Incidents ("View Event") — jump straight to that
+  // event's detail panel.
+  useEffect(() => {
+    const eventId = searchParams.get("event");
+    if (eventId) {
+      getLog(eventId).then(setSelected).catch(() => {});
+    }
+  }, [searchParams]);
 
   const filters = {
     q: search || undefined,
@@ -85,19 +98,21 @@ export default function Logs() {
     <div>
       <h2>Log Explorer</h2>
 
-      <div className="panel">
-        <h3>Upload Log File</h3>
-        <input type="file" onChange={(e) => setFile(e.target.files[0])} />
-        <button onClick={handleUpload} disabled={!file || uploadMutation.isPending}>
-          {uploadMutation.isPending ? "Uploading…" : "Upload"}
-        </button>
-        {uploadMutation.isSuccess && (
-          <span>
-            {" "}Ingested {uploadMutation.data.stored} of {uploadMutation.data.total_lines} lines
-            ({uploadMutation.data.failed} failed to parse).
-          </span>
-        )}
-      </div>
+      {can("logs.upload") && (
+        <div className="panel">
+          <h3>Upload Log File</h3>
+          <input type="file" onChange={(e) => setFile(e.target.files[0])} />
+          <button onClick={handleUpload} disabled={!file || uploadMutation.isPending}>
+            {uploadMutation.isPending ? "Uploading…" : "Upload"}
+          </button>
+          {uploadMutation.isSuccess && (
+            <span>
+              {" "}Ingested {uploadMutation.data.stored} of {uploadMutation.data.total_lines} lines
+              ({uploadMutation.data.failed} failed to parse).
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="filter-bar">
         <input

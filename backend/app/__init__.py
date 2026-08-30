@@ -24,13 +24,18 @@ def create_app(config_class=Config):
     from app.routes.alerts import alerts_bp
     from app.routes.stats import stats_bp
     from app.routes.rules import rules_bp
+    from app.routes.users import users_bp
+    from app.routes.incidents import incidents_bp
+    from app.routes.audit import audit_bp
     from app.utils.auth import require_auth_before_request
 
     # Every route except /api/auth/* requires a valid JWT. Registered on the
     # app (not the blueprint objects, which are module-level singletons and
     # would blow up on Blueprint.before_request() the second time create_app()
     # runs — e.g. once per test) and filtered by blueprint name instead.
-    protected_blueprints = {"logs", "alerts", "stats", "rules"}
+    # Role/permission enforcement on top of this lives in app/auth/ and is
+    # applied per-route via @require_permission, not here.
+    protected_blueprints = {"logs", "alerts", "stats", "rules", "users", "incidents", "audit"}
     if app.config.get("REQUIRE_AUTH", True):
         @app.before_request
         def _enforce_auth():
@@ -42,6 +47,9 @@ def create_app(config_class=Config):
     app.register_blueprint(alerts_bp, url_prefix="/api/alerts")
     app.register_blueprint(stats_bp, url_prefix="/api/stats")
     app.register_blueprint(rules_bp, url_prefix="/api/rules")
+    app.register_blueprint(users_bp, url_prefix="/api/users")
+    app.register_blueprint(incidents_bp, url_prefix="/api/incidents")
+    app.register_blueprint(audit_bp, url_prefix="/api/audit-log")
 
     # Background anomaly detection scheduler
     if not scheduler.running and app.config.get("ENABLE_SCHEDULER", True):

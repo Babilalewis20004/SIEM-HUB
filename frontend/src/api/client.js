@@ -61,4 +61,25 @@ export const getLog = (id) =>
 export const uploadLogs = (formData) =>
   client.post("/logs/upload", formData).then((r) => r.data);
 
+export const getUsers = () => client.get("/users").then((r) => r.data);
+export const updateUserRole = (id, role) =>
+  client.patch(`/users/${id}/role`, { role }).then((r) => r.data);
+export const updateUserStatus = (id, is_active) =>
+  client.patch(`/users/${id}/status`, { is_active }).then((r) => r.data);
+
+export const getIncidents = (params = {}) =>
+  client.get("/incidents", { params }).then((r) => r.data);
+export const getIncident = (id) =>
+  client.get(`/incidents/${id}`).then((r) => r.data);
+export const createIncident = (data) =>
+  client.post("/incidents", data).then((r) => r.data);
+export const updateIncident = (id, data) =>
+  client.patch(`/incidents/${id}`, data).then((r) => r.data);
+export const assignIncident = (id, assigned_to) =>
+  client.post(`/incidents/${id}/assign`, { assigned_to }).then((r) => r.data);
+export const setIncidentStatus = (id, status, reopen = false) =>
+  client.post(`/incidents/${id}/status`, { status, reopen }).then((r) => r.data);
+export const addIncidentNote = (id, content) =>
+  client.post(`/incidents/${id}/notes`, { content }).then((r) => r.data);
+
 export default client;

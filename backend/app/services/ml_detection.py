@@ -33,6 +33,7 @@ from sklearn.preprocessing import StandardScaler
 
 from app import db
 from app.models import Event, Alert
+from app.services import correlation
 
 FEATURE_NAMES = [
     "total_events",
@@ -221,22 +222,28 @@ def run_ml_detection_job():
             continue
 
         severity = "critical" if score < -0.15 else "warning"
-        db.session.add(Alert(
+        alert = Alert(
             event_id=group_events[-1].id,
             rule_name=RULE_NAME,
+            title="ML anomaly detected",
             severity=severity,
             description=(
                 f"Isolation Forest flagged unusual activity from {ip}: "
                 f"{len(group_events)} events in {bucket_seconds}s "
                 f"(anomaly score {score:.3f}, lower = more anomalous)"
             ),
+            detection_source="ml",
+            anomaly_score=round(score, 4),
             context={
                 "group_key": ip,
                 "bucket": bucket_key,
                 "anomaly_score": round(score, 4),
                 "features": dict(zip(FEATURE_NAMES, build_feature_vector(group_events))),
             },
-        ))
+        )
+        db.session.add(alert)
+        db.session.flush()
+        correlation.correlate_alert(alert)
         created += 1
 
     db.session.commit()

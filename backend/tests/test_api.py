@@ -85,24 +85,26 @@ def test_alerts_list_and_resolve(client, db, auth_headers):
     assert resp.get_json()["total"] == 0
 
 
-def test_rules_crud(client, db, auth_headers):
+def test_rules_crud(client, db, admin_auth_headers):
+    # Rules management is admin-only under RBAC; analysts can still read (see
+    # test_rbac.py for the full role matrix).
     resp = client.post("/api/rules", json={
         "name": "test_rule",
         "rule_type": "threshold",
         "condition": {"event_type": "authentication_failure", "count": 5, "window_seconds": 60},
-    }, headers=auth_headers)
+    }, headers=admin_auth_headers)
     assert resp.status_code == 201
     rule_id = resp.get_json()["id"]
 
-    resp = client.get("/api/rules", headers=auth_headers)
+    resp = client.get("/api/rules", headers=admin_auth_headers)
     assert resp.status_code == 200
     assert len(resp.get_json()) == 1
 
-    resp = client.patch(f"/api/rules/{rule_id}", json={"enabled": False}, headers=auth_headers)
+    resp = client.patch(f"/api/rules/{rule_id}", json={"enabled": False}, headers=admin_auth_headers)
     assert resp.status_code == 200
     assert resp.get_json()["enabled"] is False
 
-    resp = client.delete(f"/api/rules/{rule_id}", headers=auth_headers)
+    resp = client.delete(f"/api/rules/{rule_id}", headers=admin_auth_headers)
     assert resp.status_code == 204
 
 

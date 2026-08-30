@@ -1,0 +1,93 @@
+"""
+Incident — a first-class investigation grouping one or more related Alerts,
+produced by app/services/correlation.py or created manually by an analyst/
+admin. See docs/ARCHITECTURE.md for the full Event -> Alert -> Incident
+pipeline and the incident status state machine.
+"""
+import uuid
+from datetime import datetime
+
+from app import db
+
+SEVERITY_LEVELS = ("info", "low", "medium", "high", "critical")
+PRIORITY_LEVELS = ("low", "medium", "high", "critical")
+STATUSES = ("open", "investigating", "contained", "resolved", "closed")
+
+
+def gen_uuid():
+    return str(uuid.uuid4())
+
+
+class Incident(db.Model):
+    __tablename__ = "incidents"
+
+    id = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+
+    title = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+
+    severity = db.Column(db.String(16), default="medium", index=True)   # see SEVERITY_LEVELS
+    status = db.Column(db.String(16), default="open", index=True)       # see STATUSES
+    priority = db.Column(db.String(16), default="medium", index=True)   # see PRIORITY_LEVELS
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    first_seen_at = db.Column(db.DateTime, nullable=True)
+    last_seen_at = db.Column(db.DateTime, nullable=True, index=True)
+
+    assigned_to = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=True)
+    created_by = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=True)  # null = system/correlation
+    resolved_by = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=True)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+
+    alerts = db.relationship("Alert", backref="incident", lazy=True)
+    notes = db.relationship(
+        "IncidentNote", backref="incident", lazy=True,
+        order_by="IncidentNote.created_at", cascade="all, delete-orphan",
+    )
+
+    def to_dict(self, include_alerts=True, include_notes=False):
+        data = {
+            "id": self.id,
+            "title": self.title,
+            "description": self.description,
+            "severity": self.severity,
+            "status": self.status,
+            "priority": self.priority,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "first_seen_at": self.first_seen_at.isoformat() if self.first_seen_at else None,
+            "last_seen_at": self.last_seen_at.isoformat() if self.last_seen_at else None,
+            "assigned_to": self.assigned_to,
+            "created_by": self.created_by,
+            "resolved_by": self.resolved_by,
+            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+            "alert_count": len(self.alerts),
+        }
+        if include_alerts:
+            data["alerts"] = [a.to_dict() for a in self.alerts]
+        if include_notes:
+            data["notes"] = [n.to_dict() for n in self.notes]
+        return data
+
+
+class IncidentNote(db.Model):
+    __tablename__ = "incident_notes"
+
+    id = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    incident_id = db.Column(db.String(36), db.ForeignKey("incidents.id"), nullable=False, index=True)
+    author_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False)
+
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "incident_id": self.incident_id,
+            "author_id": self.author_id,
+            "content": self.content,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

@@ -56,3 +56,45 @@ def auth_headers(app, user):
         u = User.query.get(user)
         token = encode_token(u)
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def admin_user(app, db):
+    from app.models import User
+    with app.app_context():
+        u = User(email="admin@example.com", role="admin")
+        u.set_password("password123")
+        db.session.add(u)
+        db.session.commit()
+        return u.id
+
+
+@pytest.fixture
+def admin_auth_headers(app, admin_user):
+    from app.models import User
+    from app.utils.auth import encode_token
+    with app.app_context():
+        u = User.query.get(admin_user)
+        token = encode_token(u)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def viewer_user(app, db):
+    from app.models import User
+    with app.app_context():
+        u = User(email="viewer@example.com", role="viewer")
+        u.set_password("password123")
+        db.session.add(u)
+        db.session.commit()
+        return u.id
+
+
+@pytest.fixture
+def viewer_auth_headers(app, viewer_user):
+    from app.models import User
+    from app.utils.auth import encode_token
+    with app.app_context():
+        u = User.query.get(viewer_user)
+        token = encode_token(u)
+    return {"Authorization": f"Bearer {token}"}

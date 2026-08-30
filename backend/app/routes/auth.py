@@ -24,8 +24,11 @@ def register():
     if User.query.filter_by(email=email).first():
         return jsonify({"error": "An account with that email already exists."}), 409
 
-    # First user to register becomes admin; everyone after is an analyst.
-    role = "admin" if User.query.count() == 0 else "analyst"
+    # First user to register becomes admin (bootstrapping the system); every
+    # subsequent self-registration is a viewer (least privilege) — an admin
+    # promotes trusted accounts to analyst via PATCH /api/users/<id>/role.
+    # `role` is never accepted from the request body (mass-assignment guard).
+    role = "admin" if User.query.count() == 0 else "viewer"
 
     user = User(email=email, role=role)
     user.set_password(password)
@@ -45,6 +48,8 @@ def login():
     user = User.query.filter_by(email=email).first()
     if not user or not user.check_password(password):
         return jsonify({"error": "Invalid email or password."}), 401
+    if not user.is_active:
+        return jsonify({"error": "This account has been disabled."}), 403
 
     token = encode_token(user)
     return jsonify({"token": token, "user": user.to_dict()})

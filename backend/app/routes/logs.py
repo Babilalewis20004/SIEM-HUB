@@ -6,6 +6,8 @@ from app import db
 from app.models import Event
 from app.services.normalization import normalize_line
 from app.services.validation import validate_event_data, EventValidationError
+from app.auth.authorization import require_permission
+from app.auth.permissions import EVENTS_READ, LOGS_UPLOAD
 
 logs_bp = Blueprint("logs", __name__)
 
@@ -15,6 +17,7 @@ MAX_LINES_PER_UPLOAD = 50_000
 
 
 @logs_bp.route("/upload", methods=["POST"])
+@require_permission(LOGS_UPLOAD)
 def upload_logs():
     """
     Ingestion pipeline: upload -> detect format -> parse -> normalise ->
@@ -79,6 +82,7 @@ def upload_logs():
 
 
 @logs_bp.route("", methods=["GET"])
+@require_permission(EVENTS_READ)
 def list_logs():
     q = Event.query
 
@@ -142,6 +146,7 @@ def list_logs():
 
 
 @logs_bp.route("/<event_id>", methods=["GET"])
+@require_permission(EVENTS_READ)
 def get_log(event_id):
     event = Event.query.get_or_404(event_id)
     return jsonify(event.to_dict())
