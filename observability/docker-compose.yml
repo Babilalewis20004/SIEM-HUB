@@ -1,0 +1,23 @@
+services:
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    # Lets the container reach the backend running directly on the host
+    # (python run.py, not containerized) -- host.docker.internal resolves
+    # out of the box on Docker Desktop (Windows/Mac); host-gateway is what
+    # makes it resolve on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:12.2.1
+    depends_on:
+      - prometheus
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - "3000:3000"

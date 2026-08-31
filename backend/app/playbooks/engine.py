@@ -25,6 +25,8 @@ from app import db
 from app.events import bus
 from app.models import Alert, Incident
 from app.services.audit import log_action
+from app.services.metrics import playbook_executions_total
+from app.utils.job_logging import logged_job
 from app.playbooks.actions import ActionContext
 from app.playbooks.models import PlaybookExecution, PlaybookApproval, PlaybookActionLog
 from app.playbooks.registry import get_action
@@ -122,7 +124,7 @@ def start_execution_async(app, execution_id: str):
 
 
 def run(app, execution_id: str):
-    with app.app_context():
+    with app.app_context(), logged_job(f"playbook_execution:{execution_id}"):
         execution = PlaybookExecution.query.get(execution_id)
         if execution is None:
             logger.error("playbook execution %s vanished before it could run", execution_id)
@@ -169,6 +171,7 @@ def run(app, execution_id: str):
         execution.status = "completed"
         execution.completed_at = datetime.utcnow()
         db.session.commit()
+        playbook_executions_total.labels("completed").inc()
         bus.publish("playbook.completed", {
             "execution_id": execution.id, "playbook_id": playbook.id, "playbook_name": playbook.name,
         })
@@ -179,6 +182,7 @@ def _fail_execution(execution, playbook, message: str):
     execution.error = message
     execution.completed_at = datetime.utcnow()
     db.session.commit()
+    playbook_executions_total.labels("failed").inc()
     bus.publish("playbook.failed", {
         "execution_id": execution.id, "playbook_id": playbook.id, "playbook_name": playbook.name,
         "error": message,

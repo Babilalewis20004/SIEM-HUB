@@ -92,6 +92,19 @@ def test_ml_detection_without_trained_model_noops(app, db, tmp_path):
         assert "reason" in result
 
 
+def test_get_model_status_logs_and_degrades_on_corrupt_model_file(app, db, tmp_path, caplog):
+    with app.app_context():
+        model_path = tmp_path / "model.joblib"
+        model_path.write_bytes(b"not a real joblib file")
+        app.config["ML_MODEL_PATH"] = str(model_path)
+
+        with caplog.at_level("ERROR"):
+            status = get_model_status()
+
+        assert status == {"trained": False}
+        assert any("Failed to load ML model" in r.message for r in caplog.records)
+
+
 def test_ml_detection_flags_anomalous_burst(app, db, tmp_path):
     with app.app_context():
         app.config["ML_MODEL_PATH"] = str(tmp_path / "model.joblib")

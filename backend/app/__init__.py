@@ -1,10 +1,15 @@
-from flask import Flask, request
+import time
+
+from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_apscheduler import APScheduler
 from flask_socketio import SocketIO
+from werkzeug.exceptions import HTTPException
 from config import Config
+
+from app.logging_config import configure_logging
 
 db = SQLAlchemy()
 migrate = Migrate()
@@ -25,6 +30,7 @@ socketio = SocketIO(async_mode="threading", manage_session=False)
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+    configure_logging(app)
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -43,7 +49,30 @@ def create_app(config_class=Config):
     from app.routes.iocs import iocs_bp
     from app.routes.mitre import mitre_bp
     from app.routes.playbooks import playbooks_bp, playbook_executions_bp
+    from app.routes.health import health_bp
+    from app.routes.metrics import metrics_bp
     from app.utils.auth import require_auth_before_request
+
+    # HTTP metrics: registered before the auth gate below so the timer starts
+    # (and every response, including 401s, gets counted) regardless of
+    # whether a later before_request short-circuits the request. Labeled by
+    # request.url_rule.rule (the route pattern, e.g. "/api/alerts/<id>")
+    # rather than request.path, which would give every distinct alert/
+    # incident/user id its own label series — unbounded cardinality is the
+    # classic way to make a Prometheus instance fall over.
+    from app.services.metrics import http_requests_total, http_request_duration_seconds
+
+    @app.before_request
+    def _metrics_start_timer():
+        request._metrics_start = time.monotonic()
+
+    @app.after_request
+    def _metrics_record(response):
+        path = request.url_rule.rule if request.url_rule else "unmatched"
+        duration = time.monotonic() - request._metrics_start
+        http_request_duration_seconds.labels(request.method, path).observe(duration)
+        http_requests_total.labels(request.method, path, response.status_code).inc()
+        return response
 
     # Every route except /api/auth/* requires a valid JWT. Registered on the
     # app (not the blueprint objects, which are module-level singletons and
@@ -61,7 +90,25 @@ def create_app(config_class=Config):
             if request.blueprint in protected_blueprints:
                 return require_auth_before_request()
 
+    # Catch-all so an unhandled exception is always logged (with traceback)
+    # and always returns valid JSON instead of leaking a stack trace to the
+    # client — Flask calls a registered handler for Exception regardless of
+    # debug mode, so without the app.debug branch below this would also
+    # swallow Werkzeug's interactive debugger locally. HTTPException (404s,
+    # the 401s from require_auth_before_request, etc.) is passed through
+    # unchanged; those already have the right status code and shape.
+    @app.errorhandler(Exception)
+    def _handle_unhandled_exception(exc):
+        if isinstance(exc, HTTPException):
+            return exc
+        app.logger.exception("Unhandled exception on %s %s", request.method, request.path)
+        if app.debug:
+            raise exc
+        return jsonify({"error": "internal_server_error"}), 500
+
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
+    app.register_blueprint(health_bp, url_prefix="/api")
+    app.register_blueprint(metrics_bp, url_prefix="/api")
     app.register_blueprint(logs_bp, url_prefix="/api/logs")
     app.register_blueprint(alerts_bp, url_prefix="/api/alerts")
     app.register_blueprint(stats_bp, url_prefix="/api/stats")
@@ -95,18 +142,32 @@ def create_app(config_class=Config):
 
         from app.services.detection import run_detection_job
         from app.services.ml_detection import run_ml_detection_job
+        from app.utils.job_logging import logged_job
+        from app.services.metrics import detection_job_runs_total, detection_job_duration_seconds
+
+        def _run_scheduled_job(job_name, job_fn):
+            start = time.monotonic()
+            outcome = "success"
+            try:
+                with logged_job(job_name):
+                    with app.app_context():
+                        job_fn()
+            except Exception:
+                outcome = "failed"
+                raise
+            finally:
+                detection_job_duration_seconds.labels(job_name).observe(time.monotonic() - start)
+                detection_job_runs_total.labels(job_name, outcome).inc()
 
         @scheduler.task("interval", id="anomaly_detection", seconds=app.config.get("DETECTION_INTERVAL_SECONDS", 30))
         def scheduled_detection():
-            with app.app_context():
-                run_detection_job()
+            _run_scheduled_job("anomaly_detection", run_detection_job)
 
         if app.config.get("ML_SCORING_ENABLED", True):
             @scheduler.task("interval", id="ml_anomaly_detection", seconds=app.config.get("DETECTION_INTERVAL_SECONDS", 30))
             def scheduled_ml_detection():
-                with app.app_context():
-                    # No-ops gracefully (returns a "reason") until a model has been trained
-                    run_ml_detection_job()
+                # No-ops gracefully (returns a "reason") until a model has been trained
+                _run_scheduled_job("ml_anomaly_detection", run_ml_detection_job)
 
     # Schema is managed by Flask-Migrate (`flask db upgrade`) now that the
     # normalised Event schema exists — see docs/ARCHITECTURE.md. The one

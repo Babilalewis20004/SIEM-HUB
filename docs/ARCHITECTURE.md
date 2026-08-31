@@ -609,3 +609,66 @@ no external action), *Malicious IOC Investigation* (alert-triggered on
 `ioc_match == true`; tag + note + notify + a `block_ip` step that always
 parks for approval), *Critical Incident Notification*
 (incident-triggered on `severity == critical`; notify + note).
+
+## GeoIP enrichment
+
+`app/services/geoip.py` wraps `geoip2fast`'s bundled country-level
+dataset — no MaxMind account, license key, or per-lookup network call,
+so it behaves the same in an offline dev environment as in CI.
+Deliberately **not persisted** on the `Event` row: a lookup costs
+single-digit microseconds against the in-memory dataset, so it's cheaper
+and less stale-prone to compute wherever a source IP is serialized
+(`Event.to_dict()`'s `source_geo` field, `/stats/summary`'s
+`events_by_country`) than to add a column and a backfill migration.
+`lookup_country()` returns `None` for a missing, private/reserved-range,
+or unresolvable IP — those bucket into `"Unknown / Private"` in the
+dashboard's country breakdown rather than being dropped.
+
+## Observability
+
+Three independent layers, added together but each usable without the
+others:
+
+- **Structured logging** (`app/logging_config.py`) — every logger in the
+  process (Flask's own, Werkzeug's request log, and the module-level
+  `logging.getLogger(__name__)` already scattered through app/services
+  and app/playbooks) is routed through one JSON-formatting handler on
+  the *root* logger, configured once in `create_app()`. The handler is
+  attached by name and only a same-named handler is ever removed on a
+  repeat call, so `configure_logging()` stays idempotent across
+  `create_app()` running more than once per process (e.g. once per
+  test) without also ripping out a handler something else attached to
+  root — notably pytest's own log-capture handler, which `caplog`-based
+  tests depend on.
+- **Health endpoints** (`app/routes/health.py`) — `GET /api/health`
+  (liveness: the process is up, no dependency check) and
+  `GET /api/health/ready` (readiness: checks the one hard dependency,
+  the database). Both are unauthenticated by design (excluded from
+  `protected_blueprints` in `app/__init__.py`) — a load balancer or
+  orchestrator has no JWT to present.
+- **Metrics** (`app/services/metrics.py`, exposed at `GET /api/metrics`
+  in Prometheus text format) — HTTP request count/latency (labeled by
+  `request.url_rule.rule`, the route *pattern*, never `request.path`,
+  which would give every distinct alert/incident/user id its own label
+  series and blow up cardinality), scheduled-detection-job
+  count/duration/outcome, alerts created (by detection source and
+  severity, incremented at the single `enrich_and_correlate()` choke
+  point every detection path already runs through), and playbook
+  execution outcomes. Nothing scrapes `/metrics` in this stack today —
+  it exists so the endpoint has real data the day something does, not
+  because there's a Prometheus server behind this app yet.
+
+Two supporting pieces used by more than one layer above:
+`app/utils/job_logging.py::logged_job()` is a context manager giving
+start/end/duration/outcome logging to anything with no other
+supervisor — wrapped around both scheduled detection jobs and around
+the playbook engine's `run()` (a bare `socketio.start_background_task`
+with nothing else watching it; an uncaught exception there used to just
+die on the thread with only Python's default `threading.excepthook` to
+notice). `app/__init__.py`'s global `@app.errorhandler(Exception)`
+logs any exception that reaches it with a full traceback and returns a
+generic JSON 500 instead of leaking one — except in `app.debug` mode,
+where it re-raises so Werkzeug's interactive debugger still takes over
+locally (Flask calls a registered `Exception` handler regardless of
+debug mode, so without that branch this handler would otherwise also
+swallow the debugger).

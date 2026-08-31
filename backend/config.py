@@ -22,6 +22,9 @@ class Config:
 
     CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:5173")
 
+    # Observability
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
     # Schema is managed via `flask db upgrade` (Flask-Migrate) by default.
     # Only auto-create tables from the live models when there's no migration
     # history to apply to (e.g. test databases) — see app/__init__.py.

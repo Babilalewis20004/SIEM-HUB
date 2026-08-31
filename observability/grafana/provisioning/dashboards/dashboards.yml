@@ -1,0 +1,9 @@
+apiVersion: 1
+
+providers:
+  - name: siem-hub
+    folder: SIEM-HUB
+    type: file
+    options:
+      path: /etc/grafana/dashboards
+    allowUiUpdates: true

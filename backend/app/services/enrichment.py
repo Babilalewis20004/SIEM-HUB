@@ -14,11 +14,14 @@ import logging
 
 from app.events import bus
 from app.services import correlation, mitre_enrichment, ioc_matching
+from app.services.metrics import alerts_created_total
 
 logger = logging.getLogger(__name__)
 
 
 def enrich_and_correlate(alert):
+    alerts_created_total.labels(alert.detection_source or "unknown", alert.severity).inc()
+
     try:
         mitre_enrichment.enrich_alert(alert)
     except Exception:

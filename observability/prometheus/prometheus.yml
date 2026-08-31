@@ -1,0 +1,6 @@
+scrape_configs:
+  - job_name: siem-hub-backend
+    metrics_path: /api/metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["host.docker.internal:5000"]

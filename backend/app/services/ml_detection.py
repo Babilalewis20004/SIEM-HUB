@@ -20,6 +20,7 @@ Pipeline:
 This is intentionally a from-scratch, dependency-light pipeline (no feature
 store, no MLflow) so it's easy to read end-to-end for a portfolio project.
 """
+import logging
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -34,6 +35,8 @@ from sklearn.preprocessing import StandardScaler
 from app import db
 from app.models import Event, Alert
 from app.services import enrichment
+
+logger = logging.getLogger(__name__)
 
 FEATURE_NAMES = [
     "total_events",
@@ -114,6 +117,7 @@ def _load_model():
     try:
         return joblib.load(path)
     except Exception:
+        logger.exception("Failed to load ML model from %s; treating as untrained.", path)
         return None
 
 
