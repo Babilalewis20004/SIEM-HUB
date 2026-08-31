@@ -4,6 +4,7 @@ import { useRealtime } from "../hooks/useRealtime.js";
 import LiveAlertFeed from "../components/LiveAlertFeed.jsx";
 import PlaybookActivity from "../components/PlaybookActivity.jsx";
 import DashboardVisualizations from "../components/DashboardVisualizations.jsx";
+import DetectionStatus from "../components/DetectionStatus.jsx";
 
 function StatCard({ label, value, tone = "default" }) {
   return (
@@ -47,6 +48,8 @@ export default function Dashboard() {
         <StatCard label="High-risk IOC Matches" value={summary?.high_risk_ioc_matches ?? 0} tone="critical" />
         <StatCard label="Playbooks Running" value={summary?.playbooks_running ?? 0} />
       </div>
+
+      <DetectionStatus status={summary?.detection_status} />
 
       <LiveAlertFeed />
       <PlaybookActivity />

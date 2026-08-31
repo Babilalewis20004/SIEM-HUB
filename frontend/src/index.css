@@ -595,6 +595,11 @@ body {
 .status-reconnecting .connection-dot { background: var(--warning); }
 .status-offline .connection-dot { background: var(--critical); }
 
+.detection-status {
+  font-size: 12px;
+  margin: -8px 0 20px;
+}
+
 .live-feed {
   display: flex;
   flex-direction: column;

@@ -129,8 +129,10 @@ def create_app(config_class=Config):
     from app.events import bus, broadcaster
     from app.ws.handlers import register_handlers
     from app.playbooks.triggers import register_triggers
+    from app.services import job_status
 
     bus.reset()
+    job_status.reset()
     broadcaster.init_app(socketio)
     register_triggers()
     register_handlers(socketio)
@@ -144,6 +146,7 @@ def create_app(config_class=Config):
         from app.services.ml_detection import run_ml_detection_job
         from app.utils.job_logging import logged_job
         from app.services.metrics import detection_job_runs_total, detection_job_duration_seconds
+        from app.services import job_status
 
         def _run_scheduled_job(job_name, job_fn):
             start = time.monotonic()
@@ -158,6 +161,7 @@ def create_app(config_class=Config):
             finally:
                 detection_job_duration_seconds.labels(job_name).observe(time.monotonic() - start)
                 detection_job_runs_total.labels(job_name, outcome).inc()
+                job_status.record_run(job_name, outcome)
 
         @scheduler.task("interval", id="anomaly_detection", seconds=app.config.get("DETECTION_INTERVAL_SECONDS", 30))
         def scheduled_detection():

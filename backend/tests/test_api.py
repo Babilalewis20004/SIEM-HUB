@@ -58,6 +58,54 @@ def test_stats_summary_reflects_events(client, db, auth_headers):
     assert body["events_by_category"]["web"] == 1
 
 
+def test_stats_summary_detection_status_disabled_by_default(client, db, auth_headers):
+    # TestConfig sets ENABLE_SCHEDULER = False -- the trust signal should
+    # say so rather than guessing from job history that doesn't exist yet.
+    resp = client.get("/api/stats/summary", headers=auth_headers)
+    assert resp.get_json()["detection_status"] == {"state": "disabled", "last_run_at": None}
+
+
+def test_stats_summary_detection_status_unknown_when_scheduler_enabled_but_no_run_yet(
+    app, client, db, auth_headers
+):
+    app.config["ENABLE_SCHEDULER"] = True
+    resp = client.get("/api/stats/summary", headers=auth_headers)
+    assert resp.get_json()["detection_status"] == {"state": "unknown", "last_run_at": None}
+
+
+def test_stats_summary_detection_status_healthy_after_recent_success(app, client, db, auth_headers):
+    from app.services import job_status
+    app.config["ENABLE_SCHEDULER"] = True
+    job_status.record_run("anomaly_detection", "success")
+
+    resp = client.get("/api/stats/summary", headers=auth_headers)
+    body = resp.get_json()["detection_status"]
+    assert body["state"] == "healthy"
+    assert body["last_run_at"] is not None
+
+
+def test_stats_summary_detection_status_failed_when_last_run_failed(app, client, db, auth_headers):
+    from app.services import job_status
+    app.config["ENABLE_SCHEDULER"] = True
+    job_status.record_run("anomaly_detection", "failed")
+
+    resp = client.get("/api/stats/summary", headers=auth_headers)
+    assert resp.get_json()["detection_status"]["state"] == "failed"
+
+
+def test_stats_summary_detection_status_stale_past_the_interval(app, client, db, auth_headers):
+    from datetime import datetime, timedelta, timezone
+    from app.services import job_status
+    app.config["ENABLE_SCHEDULER"] = True
+    app.config["DETECTION_INTERVAL_SECONDS"] = 30
+    job_status.record_run("anomaly_detection", "success")
+    # Backdate the recorded run past the 3x-interval staleness threshold.
+    job_status._last_run["anomaly_detection"]["at"] = datetime.now(timezone.utc) - timedelta(seconds=200)
+
+    resp = client.get("/api/stats/summary", headers=auth_headers)
+    assert resp.get_json()["detection_status"]["state"] == "stale"
+
+
 def test_stats_summary_events_by_country(client, db, auth_headers):
     _seed_event(db, source_ip="8.8.8.8")  # public -> United States
     _seed_event(db, source_ip="192.168.1.50")  # private -> Unknown / Private

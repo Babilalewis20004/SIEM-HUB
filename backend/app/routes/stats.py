@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from sqlalchemy import func
 
 from app import db
@@ -10,6 +10,7 @@ from app.models.mitre import MitreTechnique, alert_mitre_techniques
 from app.playbooks.models import PlaybookExecution
 from app.services.correlation import CORRELATABLE_STATUSES
 from app.services.geoip import lookup_country
+from app.services import job_status
 from app.auth.authorization import require_permission
 from app.auth.permissions import EVENTS_READ
 
@@ -85,6 +86,24 @@ def summary():
         .all()
     )
 
+    # "Is detection actually running" trust signal for the dashboard --
+    # deliberately reads only the scheduled jobs' own run history (see
+    # app/services/job_status.py), not whether POST /run-detection has ever
+    # been called manually, since a one-off manual run shouldn't make a
+    # dead scheduler look healthy.
+    last_runs = job_status.all_last_runs()
+    last_run_at = max((v["at"] for v in last_runs.values()), default=None)
+    if not current_app.config.get("ENABLE_SCHEDULER", True):
+        detection_state = "disabled"
+    elif last_run_at is None:
+        detection_state = "unknown"
+    elif any(v["outcome"] == "failed" for v in last_runs.values()):
+        detection_state = "failed"
+    elif (datetime.now(timezone.utc) - last_run_at).total_seconds() > current_app.config.get("DETECTION_INTERVAL_SECONDS", 30) * 3:
+        detection_state = "stale"
+    else:
+        detection_state = "healthy"
+
     return jsonify({
         # deprecated aliases kept for the pre-Event dashboard
         "total_logs": total_events,
@@ -104,6 +123,10 @@ def summary():
             {"technique_id": tid, "name": name, "tactic": tactic, "count": c}
             for tid, name, tactic, c in mitre_counts
         ],
+        "detection_status": {
+            "state": detection_state,
+            "last_run_at": last_run_at.isoformat() if last_run_at else None,
+        },
 
         "active_incidents": active_incidents,
         "critical_alerts": critical_alerts,
