@@ -41,6 +41,8 @@ export const getMe = () => client.get("/auth/me").then((r) => r.data);
 export const getSummary = () => client.get("/stats/summary").then((r) => r.data);
 export const getTimeseries = (hours = 24) =>
   client.get(`/stats/timeseries?hours=${hours}`).then((r) => r.data);
+export const getIOCTimeseries = (hours = 24) =>
+  client.get(`/stats/ioc-timeseries?hours=${hours}`).then((r) => r.data);
 
 export const getAlerts = (params = {}) =>
   client.get("/alerts", { params }).then((r) => r.data);

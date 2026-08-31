@@ -7,6 +7,23 @@
   --accent: #4f8cff;
   --warning: #f5a623;
   --critical: #e6493d;
+
+  /* Status ramp for ordinal severity/outcome charts (info < low < medium < high < critical) */
+  --stat-neutral: #6b7a94;
+  --stat-good: #3cc878;
+  --stat-warn: var(--warning);
+  --stat-serious: #eb6834;
+  --stat-bad: var(--critical);
+
+  /* Fixed-order categorical palette for multi-series charts (e.g. MITRE tactics) */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
 }
 
 * { box-sizing: border-box; }
@@ -632,3 +649,60 @@ body {
 .playbook-step-list li { color: var(--text); }
 .playbook-step-list .step-icon { display: inline-block; width: 16px; }
 .playbook-step-list em { color: var(--warning); font-style: normal; margin-left: 4px; }
+
+/* --- Dashboard visualization tabs --- */
+
+.viz-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.viz-tab {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.viz-tab:hover { color: var(--text); }
+
+.viz-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.viz-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.viz-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.viz-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.viz-empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 24px 0;
+  text-align: center;
+}

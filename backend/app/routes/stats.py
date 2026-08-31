@@ -6,6 +6,7 @@ from sqlalchemy import func
 from app import db
 from app.models import Event, Alert, Incident
 from app.models.ioc import IOC, IOCMatch
+from app.models.mitre import MitreTechnique, alert_mitre_techniques
 from app.playbooks.models import PlaybookExecution
 from app.services.correlation import CORRELATABLE_STATUSES
 from app.auth.authorization import require_permission
@@ -63,6 +64,19 @@ def summary():
         func.count(Event.id).desc()
     ).limit(5).all()
 
+    mitre_counts = (
+        db.session.query(
+            MitreTechnique.technique_id,
+            MitreTechnique.name,
+            MitreTechnique.tactic,
+            func.count(alert_mitre_techniques.c.alert_id).label("count"),
+        )
+        .join(alert_mitre_techniques, MitreTechnique.id == alert_mitre_techniques.c.technique_id)
+        .group_by(MitreTechnique.id)
+        .order_by(func.count(alert_mitre_techniques.c.alert_id).desc())
+        .all()
+    )
+
     return jsonify({
         # deprecated aliases kept for the pre-Event dashboard
         "total_logs": total_events,
@@ -77,6 +91,10 @@ def summary():
         "events_by_outcome": outcome_counts,
         "alert_severity_counts": alert_severity_counts,
         "top_source_ips": [{"ip": ip, "count": c} for ip, c in top_sources],
+        "mitre_technique_counts": [
+            {"technique_id": tid, "name": name, "tactic": tactic, "count": c}
+            for tid, name, tactic, c in mitre_counts
+        ],
 
         "active_incidents": active_incidents,
         "critical_alerts": critical_alerts,
@@ -109,4 +127,22 @@ def timeseries():
     series = [
         {"bucket": k, **v} for k, v in sorted(buckets.items())
     ]
+    return jsonify({"hours": hours, "series": series})
+
+
+@stats_bp.route("/ioc-timeseries", methods=["GET"])
+@require_permission(EVENTS_READ)
+def ioc_timeseries():
+    """Bucketed IOC match counts for charting. Default: last 24h, hourly buckets."""
+    hours = int(request.args.get("hours", 24))
+    since = datetime.utcnow() - timedelta(hours=hours)
+
+    matches = IOCMatch.query.filter(IOCMatch.created_at >= since).all()
+
+    buckets = {}
+    for match in matches:
+        bucket_key = match.created_at.strftime("%Y-%m-%dT%H:00:00")
+        buckets[bucket_key] = buckets.get(bucket_key, 0) + 1
+
+    series = [{"bucket": k, "count": v} for k, v in sorted(buckets.items())]
     return jsonify({"hours": hours, "series": series})

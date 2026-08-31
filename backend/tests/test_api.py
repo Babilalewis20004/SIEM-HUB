@@ -1,6 +1,8 @@
 from datetime import datetime
 
 from app.models import Event, Alert
+from app.models.mitre import MitreTechnique
+from app.models.ioc import IOC, IOCMatch
 
 
 def test_register_and_login(client, db):
@@ -64,6 +66,41 @@ def test_stats_timeseries(client, db, auth_headers):
     assert body["hours"] == 24
     assert len(body["series"]) == 1
     assert body["series"][0]["total"] == 1
+
+
+def test_stats_summary_mitre_technique_counts(client, db, auth_headers):
+    event = _seed_event(db)
+    technique = MitreTechnique(technique_id="T1110", name="Brute Force", tactic="Credential Access")
+    db.session.add(technique)
+    db.session.flush()
+    alert = Alert(event_id=event.id, rule_name="brute_force_ssh", severity="critical",
+                  description="test", status="open", mitre_techniques=[technique])
+    db.session.add(alert)
+    db.session.commit()
+
+    resp = client.get("/api/stats/summary", headers=auth_headers)
+    assert resp.status_code == 200
+    counts = resp.get_json()["mitre_technique_counts"]
+    assert counts == [{"technique_id": "T1110", "name": "Brute Force",
+                        "tactic": "Credential Access", "count": 1}]
+
+
+def test_stats_ioc_timeseries(client, db, auth_headers):
+    event = _seed_event(db)
+    ioc = IOC(indicator="1.2.3.4", indicator_type="ip", normalized_indicator="1.2.3.4")
+    db.session.add(ioc)
+    db.session.flush()
+    match = IOCMatch(ioc_id=ioc.id, event_id=event.id, matched_field="source_ip",
+                      matched_value="1.2.3.4")
+    db.session.add(match)
+    db.session.commit()
+
+    resp = client.get("/api/stats/ioc-timeseries?hours=24", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["hours"] == 24
+    assert len(body["series"]) == 1
+    assert body["series"][0]["count"] == 1
 
 
 def test_alerts_list_and_resolve(client, db, auth_headers):
