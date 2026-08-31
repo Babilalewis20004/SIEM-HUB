@@ -196,12 +196,9 @@ instead of only known-bad ones. Lives in `app/services/ml_detection.py`.
   another parser's.
 - `GET /api/logs` supports filtering by `source_type`, `event_type`,
   `category`, `severity`, `source_ip`, `destination_ip`, `hostname`,
-  `username`, `outcome`, `start`/`end`, and free-text `q`.
-
-## Next steps to extend
-
-- Add more parsers (a cloud audit log, more Windows EventIDs beyond
-  4624/4625) — see `docs/ARCHITECTURE.md` for the extension pattern
-- Rate limiting, automatic periodic ML retraining, RBAC, and MITRE/IOC
-  enrichment are already implemented — see `docs/ARCHITECTURE.md` and the
-  Auth/ML sections above for how to tune or extend any of them
+  `username`, `outcome`, `start`/`end`, and free-text `q`, plus
+  `sort`/`order` (severity sorts by actual level, not alphabetically).
+- `GET /api/logs/grouped?group_by=<field>` aggregates that same filtered
+  set into per-value counts (with max severity and last-seen) — any field
+  `GET /api/logs` can filter by. The Log Explorer's "Group by" view uses
+  this; clicking a group row drills back into the raw filtered list.
