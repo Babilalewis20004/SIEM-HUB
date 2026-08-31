@@ -81,6 +81,19 @@ def test_event_to_dict_has_legacy_aliases(app, db):
         assert "ingested_at" in d
 
 
+def test_event_to_dict_source_geo(app, db):
+    with app.app_context():
+        public_event = _make_event(source_ip="8.8.8.8")
+        private_event = _make_event(source_ip="192.168.1.50")
+        db.session.add_all([public_event, private_event])
+        db.session.commit()
+
+        assert public_event.to_dict()["source_geo"] == {
+            "country_code": "US", "country_name": "United States",
+        }
+        assert private_event.to_dict()["source_geo"] is None
+
+
 def test_alert_event_id_and_log_id_alias(app, db):
     with app.app_context():
         event = _make_event()

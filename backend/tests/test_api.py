@@ -58,6 +58,17 @@ def test_stats_summary_reflects_events(client, db, auth_headers):
     assert body["events_by_category"]["web"] == 1
 
 
+def test_stats_summary_events_by_country(client, db, auth_headers):
+    _seed_event(db, source_ip="8.8.8.8")  # public -> United States
+    _seed_event(db, source_ip="192.168.1.50")  # private -> Unknown / Private
+
+    resp = client.get("/api/stats/summary", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.get_json()["events_by_country"]
+    assert body["United States"] == 1
+    assert body["Unknown / Private"] == 1
+
+
 def test_stats_timeseries(client, db, auth_headers):
     _seed_event(db)
     resp = client.get("/api/stats/timeseries?hours=24", headers=auth_headers)

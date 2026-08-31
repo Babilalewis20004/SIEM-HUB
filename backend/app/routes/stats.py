@@ -9,6 +9,7 @@ from app.models.ioc import IOC, IOCMatch
 from app.models.mitre import MitreTechnique, alert_mitre_techniques
 from app.playbooks.models import PlaybookExecution
 from app.services.correlation import CORRELATABLE_STATUSES
+from app.services.geoip import lookup_country
 from app.auth.authorization import require_permission
 from app.auth.permissions import EVENTS_READ
 
@@ -58,11 +59,18 @@ def summary():
         .group_by(Alert.severity)
         .all()
     )
-    top_sources = db.session.query(
+    source_ip_counts = db.session.query(
         Event.source_ip, func.count(Event.id).label("count")
     ).filter(Event.source_ip.isnot(None)).group_by(Event.source_ip).order_by(
         func.count(Event.id).desc()
-    ).limit(5).all()
+    ).all()
+    top_sources = source_ip_counts[:5]
+
+    country_counts = {}
+    for ip, count in source_ip_counts:
+        geo = lookup_country(ip)
+        name = geo["country_name"] if geo else "Unknown / Private"
+        country_counts[name] = country_counts.get(name, 0) + count
 
     mitre_counts = (
         db.session.query(
@@ -91,6 +99,7 @@ def summary():
         "events_by_outcome": outcome_counts,
         "alert_severity_counts": alert_severity_counts,
         "top_source_ips": [{"ip": ip, "count": c} for ip, c in top_sources],
+        "events_by_country": country_counts,
         "mitre_technique_counts": [
             {"technique_id": tid, "name": name, "tactic": tactic, "count": c}
             for tid, name, tactic, c in mitre_counts

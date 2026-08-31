@@ -54,6 +54,8 @@ class Event(db.Model):
     alerts = db.relationship("Alert", backref="event", lazy=True, cascade="all, delete-orphan")
 
     def to_dict(self):
+        from app.services.geoip import lookup_country
+
         return {
             "id": self.id,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
@@ -61,6 +63,7 @@ class Event(db.Model):
             "category": self.category,
             "source_type": self.source_type,
             "source_ip": self.source_ip,
+            "source_geo": lookup_country(self.source_ip),
             "destination_ip": self.destination_ip,
             "source_port": self.source_port,
             "destination_port": self.destination_port,

@@ -11,6 +11,7 @@ scikit-learn==1.5.1
 numpy==1.26.4
 joblib==1.4.2
 PyJWT==2.13.0
+geoip2fast==1.2.2
 
 # dev/test only
 pytest==9.1.1

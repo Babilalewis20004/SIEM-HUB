@@ -204,6 +204,11 @@ const TABS = [
     ),
   },
   {
+    key: "country",
+    label: "Events by Country",
+    render: ({ summary }) => <CategoryBarChart data={sortedEntries(summary?.events_by_country)} />,
+  },
+  {
     key: "mitre",
     label: "MITRE ATT&CK",
     render: ({ summary }) => <MitreChart counts={summary?.mitre_technique_counts} />,
