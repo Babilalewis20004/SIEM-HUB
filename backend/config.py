@@ -45,6 +45,17 @@ class Config:
 
     MAX_CONTENT_LENGTH = 25 * 1024 * 1024  # 25MB upload limit
 
+    # Rate limiting (Flask-Limiter). Storage is in-memory -- fine for this
+    # single-process app (same constraint as the Socket.IO async_mode note
+    # above); a multi-worker deployment would need RATELIMIT_STORAGE_URI
+    # pointed at Redis instead. Limits are per-IP (default key_func).
+    RATELIMIT_ENABLED = os.environ.get("RATELIMIT_ENABLED", "true").lower() != "false"
+    RATELIMIT_STORAGE_URI = "memory://"
+    RATELIMIT_HEADERS_ENABLED = True
+    RATELIMIT_LOGIN = os.environ.get("RATELIMIT_LOGIN", "10 per minute")
+    RATELIMIT_REGISTER = os.environ.get("RATELIMIT_REGISTER", "5 per minute")
+    RATELIMIT_UPLOAD = os.environ.get("RATELIMIT_UPLOAD", "60 per minute")
+
     # ML anomaly detection (Isolation Forest) tuning
     ML_MODEL_PATH = os.path.join(BASE_DIR, "app", "ml_models", "isolation_forest.joblib")
     ML_BUCKET_SECONDS = 60               # feature vectors are built per source_ip per this window
@@ -53,6 +64,8 @@ class Config:
     ML_CONTAMINATION = 0.05              # expected proportion of anomalous buckets
     ML_SCORE_LOOKBACK_MINUTES = 15       # how far back to score on each detection pass
     ML_SCORING_ENABLED = True            # scheduler scores automatically once a model exists
+    ML_AUTO_RETRAIN_ENABLED = os.environ.get("ML_AUTO_RETRAIN_ENABLED", "true").lower() != "false"
+    ML_RETRAIN_INTERVAL_SECONDS = int(os.environ.get("ML_RETRAIN_INTERVAL_SECONDS", str(6 * 60 * 60)))  # every 6h
 
     # Alert correlation (app/services/correlation.py) tuning
     CORRELATION_TIME_WINDOW_MINUTES = 15   # alerts within this window of each other may correlate

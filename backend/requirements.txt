@@ -13,6 +13,7 @@ joblib==1.4.2
 PyJWT==2.13.0
 geoip2fast==1.2.2
 prometheus_client==0.26.0
+Flask-Limiter==4.1.1
 
 # dev/test only
 pytest==9.1.1

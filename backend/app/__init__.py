@@ -6,6 +6,8 @@ from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_apscheduler import APScheduler
 from flask_socketio import SocketIO
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from werkzeug.exceptions import HTTPException
 from config import Config
 
@@ -14,6 +16,9 @@ from app.logging_config import configure_logging
 db = SQLAlchemy()
 migrate = Migrate()
 scheduler = APScheduler()
+# Per-IP by default (get_remote_address) -- applied selectively via
+# @limiter.limit(...) on individual routes (auth, log upload), not globally.
+limiter = Limiter(key_func=get_remote_address)
 # threading async mode: this app is a single Flask process (no gunicorn/
 # multiple workers, no Redis) already running APScheduler on background
 # threads -- eventlet/gevent would monkey-patch the whole process for no
@@ -36,6 +41,11 @@ def create_app(config_class=Config):
     migrate.init_app(app, db)
     CORS(app, resources={r"/api/*": {"origins": app.config.get("CORS_ORIGINS", "*")}})
     socketio.init_app(app, cors_allowed_origins=app.config.get("CORS_ORIGINS", "*"))
+    limiter.init_app(app)
+    # In-memory storage lives on the Limiter singleton, not per-app -- reset
+    # it here for the same reason as bus.reset()/job_status.reset() below:
+    # create_app() can run more than once per process (once per test).
+    limiter.reset()
 
     # Blueprints
     from app.routes.auth import auth_bp
@@ -97,6 +107,10 @@ def create_app(config_class=Config):
     # swallow Werkzeug's interactive debugger locally. HTTPException (404s,
     # the 401s from require_auth_before_request, etc.) is passed through
     # unchanged; those already have the right status code and shape.
+    @app.errorhandler(429)
+    def _handle_rate_limit_exceeded(exc):
+        return jsonify({"error": "rate_limit_exceeded", "message": str(exc.description)}), 429
+
     @app.errorhandler(Exception)
     def _handle_unhandled_exception(exc):
         if isinstance(exc, HTTPException):
@@ -172,6 +186,22 @@ def create_app(config_class=Config):
             def scheduled_ml_detection():
                 # No-ops gracefully (returns a "reason") until a model has been trained
                 _run_scheduled_job("ml_anomaly_detection", run_ml_detection_job)
+
+        if app.config.get("ML_AUTO_RETRAIN_ENABLED", True):
+            from app.services.ml_detection import train_model as _train_ml_model
+
+            # Retrains on a rolling ML_TRAINING_LOOKBACK_HOURS window, so the
+            # model keeps adapting to gradually-shifting "normal" traffic
+            # instead of staying frozen at whatever was trained at seed time.
+            # A too-small dataset just re-reports {"trained": False, "reason":
+            # ...} via _run_scheduled_job -- not an exception, so it never
+            # trips the job-failure metric/log.
+            @scheduler.task(
+                "interval", id="ml_auto_retrain",
+                seconds=app.config.get("ML_RETRAIN_INTERVAL_SECONDS", 6 * 60 * 60),
+            )
+            def scheduled_ml_retrain():
+                _run_scheduled_job("ml_auto_retrain", _train_ml_model)
 
     # Schema is managed by Flask-Migrate (`flask db upgrade`) now that the
     # normalised Event schema exists — see docs/ARCHITECTURE.md. The one

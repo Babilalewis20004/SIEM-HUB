@@ -1,8 +1,8 @@
 from datetime import datetime
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, current_app, request, jsonify
 
-from app import db
+from app import db, limiter
 from app.models import Event
 from app.services.normalization import normalize_line
 from app.services.validation import validate_event_data, EventValidationError
@@ -18,6 +18,7 @@ MAX_LINES_PER_UPLOAD = 50_000
 
 @logs_bp.route("/upload", methods=["POST"])
 @require_permission(LOGS_UPLOAD)
+@limiter.limit(lambda: current_app.config["RATELIMIT_UPLOAD"])
 def upload_logs():
     """
     Ingestion pipeline: upload -> detect format -> parse -> normalise ->

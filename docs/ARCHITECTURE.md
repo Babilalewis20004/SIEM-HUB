@@ -41,16 +41,32 @@ Normalised Security Event                     -- app/models/event.py
 
 Detection engines, the ML feature extractor, and the API only ever read
 `Event` fields. None of them import from `app/parsers/` or know which
-parser produced a given event. Adding a new log source (Windows Event,
-Apache, syslog, a firewall, a cloud audit log) means:
+parser produced a given event. Currently registered: SSH, Nginx, Apache,
+Linux firewall (iptables/UFW), Windows Security events (4624/4625, one JSON
+object per line), and a generic syslog envelope (RFC 3164/5424) fallback
+that picks up structure — hostname, tag, pid, PRI-derived severity — from
+any syslog-wrapped line no more specific parser claimed. Adding another log
+source (a cloud audit log, more Windows EventIDs, etc.) means:
 
 1. Write a `BaseParser` subclass in `app/parsers/` (format-specific extraction).
 2. Write a `normalize_<source>()` function in `app/services/normalization.py`
    that maps the parser's dict into `Event` fields, registered via
    `@normalizer_for("<source_type>")`.
-3. Register the parser in `app/parsers/__init__.py`'s `PARSERS` list.
+3. Register the parser in `app/parsers/__init__.py`'s `PARSERS` list. Order
+   matters — first match wins — so put more specific parsers before broad
+   ones (the syslog fallback is deliberately last).
 
 Nothing else changes — no detection code, no ML code, no API routes.
+
+**Auto-detection is content-based and can't always disambiguate.** Apache's
+and Nginx's combined log formats are byte-for-byte identical, so a line's
+content alone never proves which server produced it — with no hint,
+`detect_and_parse()` falls through to whichever is registered first (Nginx).
+Callers that know the source can pass `source_hint` (e.g. an upload's
+`source="apache"` field) through `normalize_line()`/`detect_and_parse()`,
+which tries the hinted parser first if one's registered for it and the line
+matches its own heuristic — the only correct way to resolve that kind of
+ambiguity, versus guessing from content.
 
 ## The Event schema
 
@@ -129,10 +145,11 @@ Both `app/services/detection.py` (threshold rules + off-hours heuristic)
 and `app/services/ml_detection.py` (Isolation Forest feature engineering)
 query `Event` exclusively — `source_ip`, `event_type`, `category`,
 `outcome`, `severity`, `parsed_fields`, `timestamp`. Neither has any
-SSH- or Nginx-specific logic; a brute-force rule watching
-`authentication_failure` events would fire identically whether those events
-came from SSH, a future Windows Event Log parser, or anything else that
-normalises into `category: "authentication"`.
+per-parser-specific logic; the brute-force threshold rule watching
+`authentication_failure` events fires identically whether those events came
+from SSH or from the Windows Security parser's 4625 events — both normalise
+into `category: "authentication"`, so the same rule (and its MITRE T1110
+mapping) covers both without change.
 
 # Architecture: RBAC + Detection Correlation / Incident model
 

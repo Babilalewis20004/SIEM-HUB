@@ -1,8 +1,8 @@
 import re
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, current_app, request, jsonify
 
-from app import db
+from app import db, limiter
 from app.models import User
 from app.utils.auth import encode_token, require_auth, get_current_user, AuthError
 
@@ -12,6 +12,7 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 @auth_bp.route("/register", methods=["POST"])
+@limiter.limit(lambda: current_app.config["RATELIMIT_REGISTER"])
 def register():
     data = request.get_json() or {}
     email = (data.get("email") or "").strip().lower()
@@ -40,6 +41,7 @@ def register():
 
 
 @auth_bp.route("/login", methods=["POST"])
+@limiter.limit(lambda: current_app.config["RATELIMIT_LOGIN"])
 def login():
     data = request.get_json() or {}
     email = (data.get("email") or "").strip().lower()

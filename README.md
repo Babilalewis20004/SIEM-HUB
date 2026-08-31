@@ -41,17 +41,25 @@ JWT-based, implemented in `app/utils/auth.py` + `app/routes/auth.py`.
 
 - `POST /api/auth/register` — `{"email": "...", "password": "..."}` (min 8
   chars). The **first** user to register becomes `role: "admin"`, everyone
-  after is `role: "analyst"` (role isn't enforced anywhere yet — it's there
-  for you to build permission checks on top of)
+  after is `role: "viewer"` (least privilege) — an admin promotes trusted
+  accounts to `analyst`/`admin` via `PATCH /api/users/<id>/role`. Role is
+  enforced everywhere via a central permission registry
+  (`app/auth/permissions.py`) — see `docs/ARCHITECTURE.md`'s RBAC section.
 - `POST /api/auth/login` — returns `{"token": "...", "user": {...}}`
 - `GET /api/auth/me` — returns the current user for a valid token
 - Every other route (`/api/logs/*`, `/api/alerts/*`, `/api/stats/*`,
-  `/api/rules/*`) requires `Authorization: Bearer <token>` — enforced via
-  `before_request` on each blueprint in `app/__init__.py`
+  `/api/rules/*`, etc.) requires `Authorization: Bearer <token>` — enforced
+  via `before_request` on each blueprint in `app/__init__.py`, with
+  per-route RBAC permission checks on top
 - Tokens expire after `JWT_EXPIRATION_HOURS` (default 12) — no refresh-token
   flow; the frontend just sends the person back to the login screen on a 401
 - Set `REQUIRE_AUTH=false` in `.env` to disable auth entirely for local
   testing (e.g. hitting the API directly with curl without a token)
+- `/api/auth/login`, `/api/auth/register`, and `/api/logs/upload` are
+  rate-limited per-IP (Flask-Limiter — see `RATELIMIT_*` in `config.py`; a
+  429 with `{"error": "rate_limit_exceeded"}` means back off). Storage is
+  in-memory, so it's single-process only; set `RATELIMIT_ENABLED=false` to
+  disable for local testing.
 
 `seed.py` creates a default account: **admin@example.com / changeme123** —
 log in with that, then change the password or delete the account and
@@ -160,8 +168,11 @@ instead of only known-bad ones. Lives in `app/services/ml_detection.py`.
 - `ML_MIN_TRAINING_SAMPLES` (default `15`) is a low bar for demo purposes;
   a real deployment wants far more historical buckets before trusting the
   model
-- Retraining is manual by design here (via the endpoint/button) — wire it
-  into the APScheduler in `app/__init__.py` for automatic periodic retrains
+- Retraining also happens automatically every `ML_RETRAIN_INTERVAL_SECONDS`
+  (default 6h) via APScheduler, on the same rolling
+  `ML_TRAINING_LOOKBACK_HOURS` window the manual endpoint uses — set
+  `ML_AUTO_RETRAIN_ENABLED=false` to go back to manual-only (the
+  endpoint/button always still works either way)
 
 ## Ingesting logs
 
@@ -172,28 +183,25 @@ instead of only known-bad ones. Lives in `app/services/ml_detection.py`.
   fails the whole batch; the response reports
   `{total_lines, parsed, normalised, failed, stored}`.
 - Parsers currently understand SSH auth lines (failed + accepted, both
-  syslog and ISO timestamps, IPv4/IPv6) and Nginx combined/common access
-  log format; unmatched lines are stored as `event_type: "unparsed"` so
-  nothing is dropped. Add a new format by writing a parser in
-  `app/parsers/` + a normaliser in `app/services/normalization.py`.
+  syslog and ISO timestamps, IPv4/IPv6), Nginx/Apache combined/common access
+  log format, Linux firewall (iptables/UFW) LOG lines, Windows Security
+  logon events (4624/4625, one JSON object per line), and a generic syslog
+  envelope (RFC 3164/5424) that recovers hostname/tag/severity from any
+  syslog-wrapped line no more specific parser claims; anything left
+  unmatched is stored as `event_type: "unparsed"` so nothing is dropped.
+  Add a new format by writing a parser in `app/parsers/` + a normaliser in
+  `app/services/normalization.py` — see `docs/ARCHITECTURE.md` for the
+  extension pattern, including how `source_hint` (e.g. `source: "apache"`
+  on upload) disambiguates formats that are byte-for-byte identical to
+  another parser's.
 - `GET /api/logs` supports filtering by `source_type`, `event_type`,
   `category`, `severity`, `source_ip`, `destination_ip`, `hostname`,
   `username`, `outcome`, `start`/`end`, and free-text `q`.
 
 ## Next steps to extend
 
-- Swap SQLite for Postgres in production (`DATABASE_URL`)
-- Add a real syslog listener (UDP/TCP) for live ingestion instead of file upload
-- WebSocket push for real-time alert updates instead of polling
-- Automatic periodic retraining of the Isolation Forest (see ML tuning notes above)
-- Richer ML features: per-host baselines instead of global, rolling
-  time-of-day baselines, sequence-based features (e.g. request ordering)
-- Enforce `role` (admin vs analyst) on sensitive routes — e.g. only admins
-  can create/delete detection rules; right now any authenticated user can
-- Refresh tokens / shorter-lived access tokens for a production deployment
-- Rate limiting on `/api/auth/login` and `/api/logs/upload` to slow down
-  credential stuffing and ingestion abuse — not implemented yet
-- Build out a real `LogSource` entity (which feed/agent submitted an event)
-  on top of the reserved `Event.source_id` column
-- Add more parsers (Windows Event, Apache, syslog, firewall, cloud audit
-  logs) — see `docs/ARCHITECTURE.md` for the extension pattern
+- Add more parsers (a cloud audit log, more Windows EventIDs beyond
+  4624/4625) — see `docs/ARCHITECTURE.md` for the extension pattern
+- Rate limiting, automatic periodic ML retraining, RBAC, and MITRE/IOC
+  enrichment are already implemented — see `docs/ARCHITECTURE.md` and the
+  Auth/ML sections above for how to tune or extend any of them
