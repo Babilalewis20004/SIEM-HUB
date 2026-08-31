@@ -1,9 +1,11 @@
 from datetime import datetime
 
 from flask import Blueprint, current_app, request, jsonify
+from sqlalchemy import case, func
 
 from app import db, limiter
 from app.models import Event
+from app.models.event import SEVERITY_LEVELS
 from app.services.normalization import normalize_line
 from app.services.validation import validate_event_data, EventValidationError
 from app.auth.authorization import require_permission
@@ -82,11 +84,29 @@ def upload_logs():
     return jsonify({**stats, "ingested": stats["stored"]}), 201
 
 
-@logs_bp.route("", methods=["GET"])
-@require_permission(EVENTS_READ)
-def list_logs():
-    q = Event.query
+# Whitelisted, not read off Event dynamically -- keeps ?sort=/?group_by= from
+# ever turning into arbitrary attribute access on the model.
+SORTABLE_FIELDS = (
+    "timestamp", "severity", "event_type", "category", "source_type",
+    "source_ip", "destination_ip", "hostname", "username", "outcome",
+)
+GROUPABLE_FIELDS = (
+    "source_type", "event_type", "category", "severity",
+    "source_ip", "destination_ip", "hostname", "username", "outcome",
+)
 
+# severity is a free-text column ("critical"/"high"/...), so an ORDER BY or
+# MAX() on it directly sorts alphabetically ("critical" < "high" < ...) --
+# meaningless for severity. This CASE maps it to a rank int first.
+_SEVERITY_RANK = case(
+    *[(Event.severity == level, rank) for rank, level in enumerate(SEVERITY_LEVELS)],
+    else_=0,
+)
+_RANK_TO_SEVERITY = dict(enumerate(SEVERITY_LEVELS))
+
+
+def _apply_filters(q):
+    """Shared by list_logs and grouped_logs so the two never drift apart."""
     source_type = request.args.get("source_type") or request.args.get("source")
     event_type = request.args.get("event_type")
     category = request.args.get("category")
@@ -119,22 +139,36 @@ def list_logs():
     if outcome:
         q = q.filter(Event.outcome == outcome)
     if start:
-        try:
-            q = q.filter(Event.timestamp >= datetime.fromisoformat(start))
-        except ValueError:
-            return jsonify({"error": f"invalid start timestamp: {start!r}"}), 400
+        q = q.filter(Event.timestamp >= datetime.fromisoformat(start))
     if end:
-        try:
-            q = q.filter(Event.timestamp <= datetime.fromisoformat(end))
-        except ValueError:
-            return jsonify({"error": f"invalid end timestamp: {end!r}"}), 400
+        q = q.filter(Event.timestamp <= datetime.fromisoformat(end))
     if search:
         q = q.filter(Event.raw_message.ilike(f"%{search}%"))
+
+    return q
+
+
+@logs_bp.route("", methods=["GET"])
+@require_permission(EVENTS_READ)
+def list_logs():
+    try:
+        q = _apply_filters(Event.query)
+    except ValueError as exc:
+        return jsonify({"error": f"invalid start/end timestamp: {exc}"}), 400
+
+    sort_by = request.args.get("sort", "timestamp")
+    order = request.args.get("order", "desc")
+    if sort_by not in SORTABLE_FIELDS:
+        return jsonify({"error": f"invalid sort field: {sort_by!r}"}), 400
+    if order not in ("asc", "desc"):
+        return jsonify({"error": f"invalid order: {order!r} (must be 'asc' or 'desc')"}), 400
+
+    sort_col = _SEVERITY_RANK if sort_by == "severity" else getattr(Event, sort_by)
+    q = q.order_by(sort_col.asc() if order == "asc" else sort_col.desc())
 
     page = max(int(request.args.get("page", 1)), 1)
     per_page = min(max(int(request.args.get("per_page", 50)), 1), 200)
 
-    q = q.order_by(Event.timestamp.desc())
     total = q.count()
     items = q.offset((page - 1) * per_page).limit(per_page).all()
 
@@ -142,7 +176,64 @@ def list_logs():
         "total": total,
         "page": page,
         "per_page": per_page,
+        "sort": sort_by,
+        "order": order,
         "items": [event.to_dict() for event in items],
+    })
+
+
+@logs_bp.route("/grouped", methods=["GET"])
+@require_permission(EVENTS_READ)
+def grouped_logs():
+    """
+    Aggregate the same filtered event set list_logs would return into counts
+    per distinct value of `group_by` -- e.g. "which source IPs are showing up
+    the most", filtered the same way the raw table is. Registered before
+    /<event_id> so Werkzeug's routing doesn't need "grouped" to look like an id
+    (static rules are matched before variable ones regardless of order, but
+    keeping it adjacent to list_logs above reads better).
+    """
+    group_by = request.args.get("group_by", "source_ip")
+    if group_by not in GROUPABLE_FIELDS:
+        return jsonify({"error": f"invalid group_by field: {group_by!r}"}), 400
+
+    try:
+        q = _apply_filters(Event.query)
+    except ValueError as exc:
+        return jsonify({"error": f"invalid start/end timestamp: {exc}"}), 400
+
+    group_col = getattr(Event, group_by)
+    rows = (
+        q.with_entities(
+            group_col,
+            func.count(Event.id),
+            func.max(Event.timestamp),
+            func.max(_SEVERITY_RANK),
+        )
+        .group_by(group_col)
+        .order_by(func.count(Event.id).desc())
+        .all()
+    )
+
+    page = max(int(request.args.get("page", 1)), 1)
+    per_page = min(max(int(request.args.get("per_page", 50)), 1), 200)
+    total = len(rows)
+    page_rows = rows[(page - 1) * per_page: (page - 1) * per_page + per_page]
+
+    return jsonify({
+        "group_by": group_by,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "groups": [
+            {
+                "key": key,
+                "count": count,
+                "last_seen": last_seen.isoformat() if last_seen else None,
+                "max_severity": _RANK_TO_SEVERITY.get(max_rank, "info"),
+            }
+            for key, count, last_seen, max_rank in page_rows
+        ],
     })
 
 

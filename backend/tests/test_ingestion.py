@@ -106,3 +106,85 @@ def test_list_logs_filters_by_category_and_source_ip(client, db, auth_headers):
     body = resp.get_json()
     assert body["total"] == 1
     assert body["items"][0]["event_type"] == "http_request"
+
+
+def _seed_mixed_events(client, auth_headers):
+    lines = [
+        # two failures from the same IP (critical-ish severity: medium), one success
+        "Aug 28 10:31:15 server sshd[1234]: Failed password for root from 192.168.1.50 port 52344 ssh2",
+        "Aug 28 10:31:16 server sshd[1234]: Failed password for root from 192.168.1.50 port 52345 ssh2",
+        "Aug 28 10:31:17 server sshd[1234]: Accepted password for alice from 10.0.0.9 port 4444 ssh2",
+        # a 5xx (high severity) and a 2xx (info severity) web event
+        '203.0.113.5 - - [20/Aug/2026:03:14:11 +0000] "POST /api HTTP/1.1" 500 0',
+        '203.0.113.5 - - [20/Aug/2026:03:14:12 +0000] "GET /index HTTP/1.1" 200 512',
+    ]
+    client.post("/api/logs/upload", json={"lines": lines}, headers=auth_headers)
+
+
+def test_list_logs_sort_by_severity(client, db, auth_headers):
+    _seed_mixed_events(client, auth_headers)
+
+    resp = client.get("/api/logs?sort=severity&order=desc", headers=auth_headers)
+    body = resp.get_json()
+    severities = [item["severity"] for item in body["items"]]
+    # "high" (the 500) must sort ahead of "medium" (failed logins), which
+    # must sort ahead of "info" (successful login, 200) -- not alphabetical,
+    # where "high" < "info" < "medium".
+    assert severities[0] == "high"
+    assert severities[-1] == "info"
+    assert body["sort"] == "severity"
+    assert body["order"] == "desc"
+
+
+def test_list_logs_sort_by_timestamp_ascending(client, db, auth_headers):
+    _seed_mixed_events(client, auth_headers)
+
+    resp = client.get("/api/logs?sort=timestamp&order=asc", headers=auth_headers)
+    body = resp.get_json()
+    timestamps = [item["timestamp"] for item in body["items"]]
+    assert timestamps == sorted(timestamps)
+
+
+def test_list_logs_invalid_sort_field_rejected(client, db, auth_headers):
+    resp = client.get("/api/logs?sort=raw_message", headers=auth_headers)
+    assert resp.status_code == 400
+
+
+def test_list_logs_invalid_order_rejected(client, db, auth_headers):
+    resp = client.get("/api/logs?order=sideways", headers=auth_headers)
+    assert resp.status_code == 400
+
+
+def test_grouped_logs_by_source_ip(client, db, auth_headers):
+    _seed_mixed_events(client, auth_headers)
+
+    resp = client.get("/api/logs/grouped?group_by=source_ip", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["group_by"] == "source_ip"
+
+    by_key = {g["key"]: g for g in body["groups"]}
+    assert by_key["192.168.1.50"]["count"] == 2
+    assert by_key["192.168.1.50"]["max_severity"] == "medium"
+    assert by_key["203.0.113.5"]["count"] == 2
+    assert by_key["203.0.113.5"]["max_severity"] == "high"
+    assert by_key["10.0.0.9"]["count"] == 1
+
+
+def test_grouped_logs_respects_existing_filters(client, db, auth_headers):
+    _seed_mixed_events(client, auth_headers)
+
+    resp = client.get("/api/logs/grouped?group_by=source_ip&category=web", headers=auth_headers)
+    body = resp.get_json()
+    keys = {g["key"] for g in body["groups"]}
+    assert keys == {"203.0.113.5"}
+
+
+def test_grouped_logs_invalid_group_by_rejected(client, db, auth_headers):
+    resp = client.get("/api/logs/grouped?group_by=raw_message", headers=auth_headers)
+    assert resp.status_code == 400
+
+
+def test_grouped_logs_requires_auth(client, db):
+    resp = client.get("/api/logs/grouped")
+    assert resp.status_code == 401

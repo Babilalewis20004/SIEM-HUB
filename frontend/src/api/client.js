@@ -58,6 +58,8 @@ export const trainModel = (lookbackHours) =>
 
 export const getLogs = (params = {}) =>
   client.get("/logs", { params }).then((r) => r.data);
+export const getGroupedLogs = (params = {}) =>
+  client.get("/logs/grouped", { params }).then((r) => r.data);
 export const getLog = (id) =>
   client.get(`/logs/${id}`).then((r) => r.data);
 export const uploadLogs = (formData) =>
