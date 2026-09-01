@@ -22,7 +22,7 @@ your machine.
 1. **Get the code:**
    ```bash
    git clone https://github.com/Babilalewis20004/SIEM-HUB.git
-   cd SIEM-HUB/SIEM-APP
+   cd SIEM-HUB
    ```
 
 2. **Create the backend's environment file** (a template with safe demo
