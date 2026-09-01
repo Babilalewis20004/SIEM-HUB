@@ -2,8 +2,8 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 import {
   login as apiLogin,
   register as apiRegister,
+  logout as apiLogout,
   getMe,
-  getToken,
   setToken as persistToken,
   clearToken,
 } from "../api/client";
@@ -15,11 +15,12 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const loadCurrentUser = useCallback(async () => {
-    if (!getToken()) {
-      setUser(null);
-      setLoading(false);
-      return;
-    }
+    // Always attempt this, even with no access token in localStorage --
+    // a 401 here (missing/expired access token) triggers the axios
+    // interceptor's silent refresh via the HttpOnly refresh-token cookie,
+    // so a still-valid 7-day session survives a page reload with no
+    // forced re-login. Only a failed refresh (or no cookie at all) lands
+    // in the catch below.
     try {
       const me = await getMe();
       setUser(me);
@@ -54,7 +55,8 @@ export function AuthProvider({ children }) {
     return newUser;
   };
 
-  const logout = () => {
+  const logout = async () => {
+    await apiLogout();
     clearToken();
     setUser(null);
   };

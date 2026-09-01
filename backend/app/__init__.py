@@ -39,7 +39,10 @@ def create_app(config_class=Config):
 
     db.init_app(app)
     migrate.init_app(app, db)
-    CORS(app, resources={r"/api/*": {"origins": app.config.get("CORS_ORIGINS", "*")}})
+    # supports_credentials so the browser sends/accepts the refresh-token
+    # cookie (app/routes/auth.py) -- requires an explicit origin below, not
+    # "*", which CORS_ORIGINS already defaults to.
+    CORS(app, resources={r"/api/*": {"origins": app.config.get("CORS_ORIGINS", "*")}}, supports_credentials=True)
     socketio.init_app(app, cors_allowed_origins=app.config.get("CORS_ORIGINS", "*"))
     limiter.init_app(app)
     # In-memory storage lives on the Limiter singleton, not per-app -- reset

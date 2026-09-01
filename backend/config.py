@@ -32,8 +32,18 @@ class Config:
 
     # Auth
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "dev-jwt-secret-change-me")
-    JWT_EXPIRATION_HOURS = int(os.environ.get("JWT_EXPIRATION_HOURS", "12"))
+    ACCESS_TOKEN_EXPIRATION_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRATION_MINUTES", "15"))
     REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "true").lower() != "false"
+
+    # Refresh tokens: long-lived, server-side (hashed) session backing a
+    # short-lived access token above. Handed to the browser only as an
+    # HttpOnly cookie (see app/routes/auth.py) so JS/XSS can never read it.
+    REFRESH_TOKEN_EXPIRATION_DAYS = int(os.environ.get("REFRESH_TOKEN_EXPIRATION_DAYS", "7"))
+    REFRESH_COOKIE_NAME = "refresh_token"
+    # Must default false: the dev stack (Vite proxy on :5173 -> Flask on
+    # :5000) runs over plain HTTP, and browsers silently drop a `Secure`
+    # cookie set over HTTP -- set REFRESH_COOKIE_SECURE=true in production.
+    REFRESH_COOKIE_SECURE = os.environ.get("REFRESH_COOKIE_SECURE", "false").lower() == "true"
 
     # Detection tuning
     ENABLE_SCHEDULER = True
@@ -55,6 +65,7 @@ class Config:
     RATELIMIT_LOGIN = os.environ.get("RATELIMIT_LOGIN", "10 per minute")
     RATELIMIT_REGISTER = os.environ.get("RATELIMIT_REGISTER", "5 per minute")
     RATELIMIT_UPLOAD = os.environ.get("RATELIMIT_UPLOAD", "60 per minute")
+    RATELIMIT_REFRESH = os.environ.get("RATELIMIT_REFRESH", "30 per minute")
 
     # ML anomaly detection (Isolation Forest) tuning
     ML_MODEL_PATH = os.path.join(BASE_DIR, "app", "ml_models", "isolation_forest.joblib")

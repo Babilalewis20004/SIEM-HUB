@@ -15,6 +15,7 @@ class _StrictConfig(TestConfig):
     RATELIMIT_LOGIN = "3 per minute"
     RATELIMIT_REGISTER = "2 per minute"
     RATELIMIT_UPLOAD = "2 per minute"
+    RATELIMIT_REFRESH = "2 per minute"
 
 
 def _client_for(config_class):
@@ -83,6 +84,23 @@ def test_rate_limiting_can_be_disabled_via_config():
     for _ in range(5):
         resp = client.post("/api/auth/login", json=payload)
         assert resp.status_code == 401  # never 429, regardless of attempt count
+
+
+def test_refresh_returns_429_after_threshold():
+    app, client = _client_for(_StrictConfig)
+    client.post(
+        "/api/auth/register", json={"email": "refresh@example.com", "password": "password123"},
+    )
+    client.post(
+        "/api/auth/login", json={"email": "refresh@example.com", "password": "password123"},
+    )
+
+    for _ in range(2):
+        resp = client.post("/api/auth/refresh")
+        assert resp.status_code == 200
+
+    resp = client.post("/api/auth/refresh")
+    assert resp.status_code == 429
 
 
 def test_rate_limit_is_per_app_not_shared_across_tests():

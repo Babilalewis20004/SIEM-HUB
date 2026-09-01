@@ -2,8 +2,13 @@ import axios from "axios";
 
 const TOKEN_KEY = "siem_lite_token";
 
+// withCredentials so the browser attaches/accepts the HttpOnly refresh-token
+// cookie set by POST /auth/login|register|refresh (see app/routes/auth.py) --
+// harmless same-origin in dev (Vite proxies /api to the backend), required
+// if frontend/backend ever end up on different origins in production.
 const client = axios.create({
   baseURL: "/api",
+  withCredentials: true,
 });
 
 // Attach the JWT to every outgoing request, if we have one.
@@ -15,15 +20,50 @@ client.interceptors.request.use((config) => {
   return config;
 });
 
-// A 401 anywhere means the token is missing/expired/invalid — clear it and
-// force a re-login rather than letting the app sit in a broken half-authed state.
+// A single in-flight refresh promise shared across concurrent 401s, so N
+// simultaneous requests trigger one POST /auth/refresh, not N.
+let refreshPromise = null;
+
+// Plain axios (not the intercepted `client`) so this call can't recurse
+// through the response interceptor below.
+export const refreshAccessToken = () =>
+  axios.post("/api/auth/refresh", null, { withCredentials: true }).then((r) => {
+    setToken(r.data.token);
+    return r.data.token;
+  });
+
+// A 401 on any request other than the refresh call itself means the access
+// token is missing/expired -- try a silent refresh (via the refresh-token
+// cookie) and retry the original request once. Only if the refresh itself
+// fails do we fall back to clearing the token and forcing a re-login.
 client.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const original = error.config;
+    const isRefreshCall = original?.url?.includes("/auth/refresh");
+
+    if (error.response?.status === 401 && !isRefreshCall && !original._retry) {
+      original._retry = true;
+      refreshPromise = refreshPromise || refreshAccessToken().finally(() => {
+        refreshPromise = null;
+      });
+      return refreshPromise
+        .then((newToken) => {
+          original.headers.Authorization = `Bearer ${newToken}`;
+          return client(original);
+        })
+        .catch((refreshError) => {
+          localStorage.removeItem(TOKEN_KEY);
+          window.dispatchEvent(new Event("siem-lite-unauthorized"));
+          return Promise.reject(refreshError);
+        });
+    }
+
+    if (error.response?.status === 401 && isRefreshCall) {
       localStorage.removeItem(TOKEN_KEY);
       window.dispatchEvent(new Event("siem-lite-unauthorized"));
     }
+
     return Promise.reject(error);
   }
 );
@@ -37,6 +77,9 @@ export const login = (email, password) =>
 export const register = (email, password) =>
   client.post("/auth/register", { email, password }).then((r) => r.data);
 export const getMe = () => client.get("/auth/me").then((r) => r.data);
+// Best-effort: revokes the server-side refresh-token session. Caller clears
+// the local access token regardless of whether this succeeds.
+export const logout = () => client.post("/auth/logout").catch(() => {});
 
 export const getSummary = () => client.get("/stats/summary").then((r) => r.data);
 export const getTimeseries = (hours = 24) =>

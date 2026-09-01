@@ -12,6 +12,7 @@ let socket = null;
 const eventListeners = new Map(); // eventType -> Set<handler>
 const statusListeners = new Set();
 let status = "offline";
+let authErrorHandler = null;
 
 function setStatus(next) {
   if (status === next) return;
@@ -28,14 +29,25 @@ export function onStatusChange(fn) {
   return () => statusListeners.delete(fn);
 }
 
-export function connect(token) {
+// `tokenProvider` is a function, not a raw string, so every (re)connection
+// attempt reads the *current* access token -- required now that access
+// tokens are short-lived (15 min): a refresh that happens via the REST
+// interceptor while this socket is open is picked up automatically on the
+// socket's next reconnect, with no extra plumbing needed here.
+// `onAuthError` (optional) is called on connect_error so the caller can
+// proactively trigger a token refresh if the socket drops purely because
+// the access token expired with no REST call happening in parallel to
+// refresh it first (e.g. a SOC analyst just watching the live feed).
+export function connect(tokenProvider, onAuthError) {
   if (socket) disconnect();
-  if (!token) return null;
+  if (!tokenProvider) return null;
+
+  authErrorHandler = onAuthError || null;
 
   setStatus("reconnecting");
   socket = io("/", {
     path: "/socket.io",
-    auth: { token },
+    auth: (cb) => cb({ token: tokenProvider() }),
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 30000,
@@ -49,7 +61,10 @@ export function connect(token) {
     // socket.io-client will keep retrying in the background.
     setStatus(reason === "io client disconnect" ? "offline" : "reconnecting");
   });
-  socket.on("connect_error", () => setStatus("reconnecting"));
+  socket.on("connect_error", () => {
+    setStatus("reconnecting");
+    authErrorHandler?.();
+  });
 
   for (const [eventType, handlers] of eventListeners) {
     handlers.forEach((handler) => socket.on(eventType, handler));
@@ -64,6 +79,7 @@ export function disconnect() {
     socket.disconnect();
     socket = null;
   }
+  authErrorHandler = null;
   setStatus("offline");
 }
 
