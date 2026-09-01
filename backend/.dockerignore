@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+tests/
+
+instance/
+*.db
+*.db-journal
+app/ml_models/*.joblib
+
+.env
+.git

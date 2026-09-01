@@ -1,0 +1,11 @@
+# Variant of prometheus.yml for the fully-containerized stack (root
+# docker-compose.yml) -- scrapes the backend by its Compose service name/
+# network DNS instead of prometheus.yml's host.docker.internal, which only
+# resolves when the backend runs directly on the host (observability/
+# docker-compose.yml's standalone monitoring-only stack).
+scrape_configs:
+  - job_name: siem-hub-backend
+    metrics_path: /api/metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["backend:5000"]

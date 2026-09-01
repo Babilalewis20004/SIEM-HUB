@@ -26,8 +26,14 @@ if __name__ == "__main__":
     # dev; CI (which just needs the server up for a DAST scan) sets
     # FLASK_DEBUG=false to skip it.
     debug = os.environ.get("FLASK_DEBUG", "true").lower() != "false"
+    # Defaults to loopback-only, matching Werkzeug's own default -- a bare
+    # `python run.py` on a dev machine shouldn't be reachable from the LAN.
+    # The Docker Compose stack sets HOST=0.0.0.0 (see docker-compose.yml)
+    # since nginx/Prometheus reach this process as a sibling container, not
+    # as localhost.
+    host = os.environ.get("HOST", "127.0.0.1")
     # Outside debug mode, flask-socketio refuses to boot the Werkzeug dev
     # server (it's not meant for production) unless explicitly overridden.
     # Fine here: FLASK_DEBUG=false is only ever set for the ephemeral CI
     # instance backing the ZAP DAST scan, not a real deployment.
-    socketio.run(app, debug=debug, port=5000, allow_unsafe_werkzeug=not debug)
+    socketio.run(app, host=host, debug=debug, port=5000, allow_unsafe_werkzeug=not debug)

@@ -1,0 +1,77 @@
+# Full containerized stack: backend + frontend (nginx) + Prometheus + Grafana.
+#
+# One-time setup: `cp backend/.env.example backend/.env` and fill in real
+# SECRET_KEY/JWT_SECRET_KEY values if you haven't already -- this file is
+# gitignored and read via env_file below, never baked into the image.
+#
+# Usage:
+#   docker compose up --build
+#   docker compose exec backend python seed.py   # first run only: admin user + sample data
+#
+# Frontend:   http://localhost:8080
+# Prometheus: http://localhost:9090
+# Grafana:    http://localhost:3000
+#
+# For a monitoring-only stack against a backend run directly on the host
+# instead, see observability/docker-compose.yml.
+services:
+  backend:
+    build: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      # run.py binds loopback-only by default (see its HOST comment) --
+      # nginx/Prometheus reach this container over the Compose network, not
+      # localhost, so it must listen on all interfaces here.
+      HOST: 0.0.0.0
+      # Browser origin the frontend container is published on -- see
+      # CORS(...) in app/__init__.py. Requests from nginx to the backend are
+      # server-to-server and same-origin from the browser's perspective, so
+      # this mainly matters if something calls the API cross-origin directly.
+      CORS_ORIGINS: http://localhost:8080
+      # 4 leading slashes = absolute path sqlite:////data/siem.db, kept on the
+      # siem-db volume below instead of the container's writable layer so it
+      # survives `docker compose down` (not `-v`).
+      DATABASE_URL: sqlite:////data/siem.db
+    volumes:
+      - siem-db:/data
+      - ml-models:/app/app/ml_models
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    volumes:
+      - ./observability/prometheus/prometheus.docker.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+
+  grafana:
+    image: grafana/grafana:12.2.1
+    depends_on:
+      - prometheus
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+
+volumes:
+  siem-db:
+  ml-models:

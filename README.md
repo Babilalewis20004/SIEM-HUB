@@ -6,6 +6,84 @@ ML anomaly detection, and visualizes alerts/trends on a dashboard. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full pipeline and the
 `Log` → `Event` migration rationale.
 
+## Quick Start
+
+Everything runs in Docker — no Python, Node, or database setup needed on
+your machine.
+
+**Prerequisites:**
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes
+  Docker Compose) installed and running
+- Ports `8080`, `5000`, `9090`, and `3000` free on your machine
+- ~5 minutes and about 2GB of disk space for images
+
+**Steps:**
+
+1. **Get the code:**
+   ```bash
+   git clone https://github.com/Babilalewis20004/SIEM-HUB.git
+   cd SIEM-HUB/SIEM-APP
+   ```
+
+2. **Create the backend's environment file** (a template with safe demo
+   defaults — no values need to be changed to try the app out):
+   ```bash
+   cp backend/.env.example backend/.env
+   ```
+
+3. **Build and start everything** (backend API, frontend, Prometheus,
+   Grafana). First run takes a few minutes to download images and build;
+   later runs are fast:
+   ```bash
+   docker compose up --build
+   ```
+   This runs in the foreground and streams logs from every service. Leave
+   it running and open a **second terminal** in the same `SIEM-APP` folder
+   for the next step. (Prefer one terminal? Run `docker compose up --build -d`
+   instead to start in the background, then use `docker compose logs -f` if
+   you want to watch the logs.)
+
+4. **Seed sample data** (one-time, in the second terminal — creates a demo
+   admin account, default detection rules, and ~3 hours of sample log
+   traffic so the dashboard isn't empty):
+   ```bash
+   docker compose exec backend python seed.py
+   ```
+
+5. **Open the app:** go to **http://localhost:8080** in your browser and
+   log in with:
+   - **Email:** `admin@example.com`
+   - **Password:** `changeme123`
+
+   You should land on a dashboard with alerts, event volume charts, and
+   MITRE ATT&CK detail already populated from the seeded data. Try the
+   **Alerts**, **Log Explorer**, **Incidents**, and **Threat Intel** pages
+   from the nav, or trigger a fresh detection pass with
+   `POST http://localhost:5000/api/alerts/run-detection`.
+
+6. **When you're done**, stop everything with `Ctrl+C` in the first
+   terminal, then:
+   ```bash
+   docker compose down          # stop containers, keep the seeded data
+   docker compose down -v       # stop containers AND delete the data (fresh start next time)
+   ```
+
+**Also available once the stack is up:**
+- Backend API directly: http://localhost:5000 (e.g. `GET /api/health`)
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000
+
+**If something doesn't come up:** run `docker compose ps` to check
+container status, or `docker compose logs backend` (swap in `frontend`,
+`prometheus`, etc.) to see what a specific service is doing. A common cause
+of failure is one of the ports above already being used by something else
+on your machine — stop that other process or edit the port mappings in
+`docker-compose.yml`.
+
+See [Running with Docker](#running-with-docker) below for more detail on
+what the stack is doing, and the rest of this README for how the
+application itself works.
+
 ## Structure
 
 ```
@@ -70,41 +148,46 @@ it to every API call via an axios interceptor, and redirects to `/login`
 (really: renders the `Login` page in place) whenever a request comes back
 401.
 
-## Backend setup
+## Running with Docker
 
 ```bash
-cd backend
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-flask db upgrade        # applies schema migrations (creates/updates events, alerts, etc.)
-python seed.py           # creates admin user + default rules + sample events
-python run.py             # runs on http://localhost:5000
+cp backend/.env.example backend/.env   # fill in real SECRET_KEY/JWT_SECRET_KEY if you don't have one yet
+docker compose up --build
+docker compose exec backend python seed.py   # first run only: admin user + sample data
 ```
+
+- Frontend (nginx-served SPA, reverse-proxying `/api` and `/socket.io` to the
+  backend): http://localhost:8080
+- Backend API directly: http://localhost:5000
+- Prometheus: http://localhost:9090 · Grafana: http://localhost:3000
+- `siem.db` and the trained ML model persist in named volumes (`siem-db`,
+  `ml-models`) across `docker compose down` (not `-v`)
+- The backend container runs migrations (`flask db upgrade`) automatically
+  on startup — see `backend/docker-entrypoint.sh`
+- `observability/docker-compose.yml` is a separate, lighter stack (just
+  Prometheus + Grafana, scraping a backend run directly on the host via
+  `python run.py`) for when you don't want the full container stack
 
 Schema is managed by Flask-Migrate (`flask db upgrade`/`flask db migrate`) —
 `db.create_all()` is no longer called automatically on startup except for
-ephemeral test databases (`AUTO_CREATE_DB=true`, set by the pytest config).
-If you're upgrading an existing pre-Event checkout, back up `siem.db`
-first; the migration copies every `logs` row into `events` (same `id`s) and
-does not drop any data.
+ephemeral test databases (`AUTO_CREATE_DB=true`, set by the pytest config)
+and a fresh Docker volume with no tables yet (`backend/docker-entrypoint.sh`
+detects that case and bootstraps the schema from the current models instead
+of running the migration chain, which assumes a pre-existing database).
 
 Detection runs automatically every 30s via APScheduler (configurable in
 `config.py`), or trigger manually: `POST /api/alerts/run-detection`.
 
 ### Running tests
 
+Tests run against a local Python environment, not the Docker image (there's
+no test stage in `backend/Dockerfile`):
+
 ```bash
 cd backend
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
 pytest
-```
-
-## Frontend setup
-
-```bash
-cd frontend
-npm install
-npm run dev             # runs on http://localhost:5173, proxies /api to :5000
 ```
 
 ## How detection works

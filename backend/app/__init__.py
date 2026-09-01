@@ -9,6 +9,7 @@ from flask_socketio import SocketIO
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 from config import Config
 
 from app.logging_config import configure_logging
@@ -35,6 +36,13 @@ socketio = SocketIO(async_mode="threading", manage_session=False)
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+    # Trust exactly one reverse-proxy hop for X-Forwarded-For/-Proto/-Host --
+    # the Docker Compose stack puts nginx (frontend/nginx.conf) in front of
+    # this app. Without this, request.remote_addr (Flask-Limiter's per-IP
+    # rate limiting, audit.py's log_action) would see nginx's container IP
+    # for every request instead of the real client. A no-op when the header
+    # is absent, so running Flask directly (local dev, no proxy) is unaffected.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     configure_logging(app)
 
     db.init_app(app)
