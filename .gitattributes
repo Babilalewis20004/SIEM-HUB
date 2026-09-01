@@ -1,0 +1,4 @@
+# Force LF line endings for files that run inside Linux containers,
+# regardless of the cloning machine's core.autocrlf setting.
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf
