@@ -5,6 +5,17 @@ from app import create_app, socketio
 app = create_app()
 
 if __name__ == "__main__":
+    # Werkzeug's dev-server HTTP handler sets its own `Server` header below
+    # the WSGI app (Flask's after_request never sees it), leaking exact
+    # Werkzeug/Python versions -- flagged by the ZAP DAST scan (see
+    # .github/workflows/security.yml). Scoped to this dev-only entrypoint;
+    # a real WSGI server (gunicorn, etc.) sets its own and isn't affected.
+    from werkzeug.serving import WSGIRequestHandler
+
+    WSGIRequestHandler.server_version = "webserver"
+    WSGIRequestHandler.sys_version = ""
+
+
     # socketio.run wraps Werkzeug's dev server with WebSocket support
     # (threading async mode -- see app/__init__.py). Using app.run() here
     # instead would silently serve REST fine but drop every WebSocket

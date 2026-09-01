@@ -95,8 +95,14 @@ def create_app(config_class=Config):
     def _security_headers(response):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        # base-uri/form-action don't fall back to default-src per the CSP
+        # spec, so 'none' there alone still leaves them unset.
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+        )
         response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+        # Pure JSON API -- nothing here is meant to be cached.
+        response.headers["Cache-Control"] = "no-store"
         return response
 
     # Every route except /api/auth/* requires a valid JWT. Registered on the
