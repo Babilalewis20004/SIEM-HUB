@@ -87,6 +87,18 @@ def create_app(config_class=Config):
         http_requests_total.labels(request.method, path, response.status_code).inc()
         return response
 
+    # Baseline hardening headers -- this is a JSON API with no HTML templates
+    # of its own, but the browser still applies these to error pages, the
+    # /api/health response, etc., and their absence is what a DAST scan
+    # (see .github/workflows/security.yml) flags first.
+    @app.after_request
+    def _security_headers(response):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+        return response
+
     # Every route except /api/auth/* requires a valid JWT. Registered on the
     # app (not the blueprint objects, which are module-level singletons and
     # would blow up on Blueprint.before_request() the second time create_app()
