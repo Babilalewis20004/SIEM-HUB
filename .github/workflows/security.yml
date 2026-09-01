@@ -123,7 +123,10 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+      # v0.28.0 is broken -- its composite action pins aquasecurity/setup-trivy@v0.2.1,
+      # a tag since deleted upstream. v0.36.0 pins that internal dependency to a SHA
+      # instead of a tag, so it isn't exposed to this.
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
