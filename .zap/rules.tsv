@@ -1,0 +1,14 @@
+# ZAP baseline alert config -- read by zaproxy/action-baseline (see the
+# dast-zap and dast-zap-frontend jobs in .github/workflows/security.yml).
+#
+# 10049 (Non-Storable Content / Storable and Cacheable Content) fires on
+# every response one way or the other: a response either lacks caching
+# headers (flagged "non-storable", a performance nudge) or has them
+# (flagged "storable", a genericized "could leak if sensitive" nudge).
+# Verified locally that no Cache-Control configuration on this JSON API
+# avoids triggering one flavor or the other -- tried both this app's actual
+# default (Cache-Control: no-store on every response) and an explicit
+# public/max-age on the /robots.txt and "/" routes; both still get flagged,
+# just under the opposite alert name. Neither route serves sensitive data,
+# so this is an unavoidable informational finding, not an actionable one.
+10049	IGNORE	Always fires (Non-Storable or Storable-and-Cacheable) regardless of Cache-Control; informational, not actionable

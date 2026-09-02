@@ -109,12 +109,26 @@ jobs:
           # User.set_password (app/models/user.py) even though the length
           # check happens beforehand (routes/auth.py) and its autofix
           # suggests a nonexistent django.contrib import for this codebase.
+          #
+          # The two nginx rules below are syntactic (no real config-flow
+          # analysis of nginx `map` directives): they flag any occurrence of
+          # $host/$http_host in the file -- including inside the `map` block
+          # that sanitizes it -- and any proxy_http_version 1.1 + Upgrade/
+          # Connection combination regardless of what the mapped values
+          # actually resolve to. frontend/nginx.conf already implements the
+          # exact mitigation each rule asks for: an explicit Host allow-list
+          # (map $http_host $allowed_host, rejecting anything but the
+          # documented localhost/localhost:8080 deployment with `return 444`)
+          # and an Upgrade header restricted to the literal value "websocket"
+          # (map $http_upgrade $upgrade_header) to prevent h2c smuggling.
           semgrep scan \
             --config=p/security-audit \
             --config=p/owasp-top-ten \
             --config=p/flask \
             --config=p/react \
             --exclude-rule python.django.security.audit.unvalidated-password.unvalidated-password \
+            --exclude-rule generic.nginx.security.request-host-used.request-host-used \
+            --exclude-rule generic.nginx.security.possible-h2c-smuggling.possible-nginx-h2c-smuggling \
             --error
 
   trivy:
@@ -175,6 +189,8 @@ jobs:
         with:
           target: "http://localhost:5000"
           fail_action: true
+          # See .zap/rules.tsv for why rule 10049 is the one alert ignored here.
+          rules_file_name: ".zap/rules.tsv"
           # Job only has `contents: read` -- without this the action tries
           # to file/update a GitHub issue with the report anyway and fails
           # noisily on the 403 on top of the real (fail_action) failure.
@@ -247,4 +263,6 @@ jobs:
         with:
           target: "http://localhost:4173"
           fail_action: true
+          # See .zap/rules.tsv for why rule 10049 is the one alert ignored here.
+          rules_file_name: ".zap/rules.tsv"
           allow_issue_writing: false

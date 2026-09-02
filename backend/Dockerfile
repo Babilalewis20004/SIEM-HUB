@@ -20,6 +20,16 @@ ENV FLASK_APP=run.py \
 
 EXPOSE 5000
 
+# /data and app/ml_models are where docker-compose.yml's named volumes
+# (siem-db, ml-models) get mounted -- pre-creating and chowning them here
+# means Docker seeds the volumes with these permissions on first mount,
+# instead of the non-root user below hitting a read-only root-owned dir.
+RUN groupadd --system app \
+    && useradd --system --gid app --home-dir /app --shell /usr/sbin/nologin app \
+    && mkdir -p /data /app/app/ml_models \
+    && chown -R app:app /app /data
+USER app
+
 # /api/health is the liveness check (app/routes/health.py) -- no DB
 # dependency, so it won't false-fail while siem.db is just slow to open.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

@@ -38,6 +38,12 @@ export default defineConfig({
   // own copies or API calls 404 and responses go out unhardened.
   preview: {
     port: 4173,
+    // Without this, Vite binds the preview server to "localhost" which can
+    // resolve to the IPv6 loopback (::1) only -- unreachable for anything
+    // that reaches it as an IPv4 peer (e.g. the ZAP DAST job's container in
+    // .github/workflows/security.yml), same class of bind-address bug
+    // run.py's HOST var fixes for the backend (see docker-entrypoint notes).
+    host: true,
     headers: securityHeaders,
     proxy: {
       "/api": {

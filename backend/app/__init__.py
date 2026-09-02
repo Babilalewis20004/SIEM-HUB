@@ -111,7 +111,26 @@ def create_app(config_class=Config):
         response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
         # Pure JSON API -- nothing here is meant to be cached.
         response.headers["Cache-Control"] = "no-store"
+        # This app deliberately serves cross-origin (CORS_ORIGINS governs the
+        # dev Vite server on a different port, see CORS(...) above) -- CORP
+        # is enforced independently of CORS in Chromium, so "same-origin"
+        # here would silently break that already-working, intentional flow.
+        # "cross-origin" leaves CORS_ORIGINS as the one real access-control
+        # mechanism, same as today, while still answering the DAST scan's
+        # Spectre-isolation check.
+        response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
         return response
+
+    # Not meaningful API surface -- just here so an unauthenticated crawler/
+    # scanner hitting the bare origin gets a real response instead of a
+    # generic 404 dressed up in JSON API error headers.
+    @app.route("/robots.txt")
+    def _robots_txt():
+        return app.response_class("User-agent: *\nDisallow: /\n", mimetype="text/plain")
+
+    @app.route("/")
+    def _root():
+        return jsonify({"service": "SIEM-HUB API", "health": "/api/health"})
 
     # Every route except /api/auth/* requires a valid JWT. Registered on the
     # app (not the blueprint objects, which are module-level singletons and
