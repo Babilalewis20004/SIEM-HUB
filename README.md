@@ -2,8 +2,13 @@
 
 [![Security](https://github.com/Babilalewis20004/SIEM-HUB/actions/workflows/security.yml/badge.svg)](https://github.com/Babilalewis20004/SIEM-HUB/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](backend/requirements.txt)
-[![React 18](https://img.shields.io/badge/react-18-61dafb.svg)](frontend/package.json)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg?logo=python&logoColor=white)](backend/requirements.txt)
+[![React 18](https://img.shields.io/badge/react-18-61dafb.svg?logo=react&logoColor=white)](frontend/package.json)
+[![Flask 3.1](https://img.shields.io/badge/flask-3.1-000000.svg?logo=flask&logoColor=white)](backend/requirements.txt)
+[![Docker](https://img.shields.io/badge/docker-compose-2496ED.svg?logo=docker&logoColor=white)](docker-compose.yml)
+[![Prometheus](https://img.shields.io/badge/prometheus-metrics-E6522C.svg?logo=prometheus&logoColor=white)](observability)
+[![Grafana](https://img.shields.io/badge/grafana-dashboards-F46800.svg?logo=grafana&logoColor=white)](observability)
+[![scikit-learn](https://img.shields.io/badge/scikit--learn-isolation--forest-F7931E.svg?logo=scikitlearn&logoColor=white)](backend/app/services/ml_detection.py)
 
 A real-time Security Information & Event Management platform — log
 ingestion, rule-based + ML anomaly detection, MITRE ATT&CK/IOC enrichment,
@@ -28,8 +33,82 @@ More: [Incidents](docs/screenshots/03-incidents.png) ·
 [Log Explorer](docs/screenshots/06-log-explorer.png) ·
 [Playbooks](docs/screenshots/07-playbooks.png)
 
+## At a glance
+
+**What I built** — a SOC platform end to end, not a dashboard bolted onto a
+database: log ingestion → normalization → two independent detection
+engines (rules + ML) → MITRE ATT&CK/IOC enrichment → deterministic,
+explainable correlation into incidents → automated response that's
+gated behind human approval — with everything streamed live to connected
+analysts over WebSockets and enforced through real RBAC.
+
+**Why I built it** — to prove security-engineering judgment, not just
+CRUD skills. Most portfolio projects stop at "logs in, dashboard out." I
+wanted the harder parts a real SOC tool needs to get right: an auth
+architecture that survives a stolen token (rotating refresh cookies +
+reuse detection), automation designed to fail safe (closed action
+registry, server-side approval floor) rather than just demo well, and a
+CI pipeline that actually blocks merges on real findings instead of a
+green checkmark for show.
+
+**Technologies** — Flask/SQLAlchemy/JWT + React/Vite, scikit-learn
+(Isolation Forest) for anomaly detection, Flask-SocketIO for real-time
+push, Docker Compose, Prometheus + Grafana. Full breakdown in
+[Tech stack](#tech-stack).
+
+**What security problems it solves**
+| Problem | How |
+|---|---|
+| Credential stuffing / brute force | Rate limiting + threshold detection, auto-tagged MITRE T1110 |
+| Stolen/leaked session tokens | 15-min JWT + rotating HttpOnly refresh cookie with reuse detection (a replayed token revokes every session) |
+| Alert fatigue | Deterministic, scored correlation collapses duplicate alerts into one incident |
+| Unreviewed automated response | Server-side approval floor on high-risk actions; a requester can never approve their own request |
+| Arbitrary code execution via automation | Closed, static playbook action registry — no dynamic dispatch on user input |
+| Unknown / novel attack patterns | ML (Isolation Forest) flags anomalous traffic no rule was written for |
+| Privilege escalation | Central RBAC registry + self-escalation and last-admin-lockout guards |
+| Vulnerable dependencies / leaked secrets | 8 blocking CI gates (gitleaks, bandit, pip-audit, npm audit, CodeQL, Semgrep, Trivy, ZAP) |
+
+Full detail: [Security](#security).
+
+**Key architectural decisions**
+- A normalized `Event` schema so detection code never knows which parser
+  produced an event — adding a new log source touches zero detection code.
+- **Two** detection engines, not one — deterministic rules and ML catch
+  different things (see [Example detection scenarios](#example-detection-scenarios)
+  for a real case where ML flagged an attack before the rule did).
+- Correlation is deterministic and scored, *not* ML — an analyst can
+  always see exactly why two alerts were grouped, never a black box.
+- An in-process event bus decouples detection from WebSocket broadcast —
+  no Redis needed at this scale, with a documented upgrade path if that
+  changes.
+- Automation is sandboxed by design: a closed action registry and mock
+  response providers mean the blast radius of a playbook bug is zero,
+  not "whatever `block_ip` happens to touch."
+- SQLite for dev, Postgres for production — one config change, not a
+  rewrite (see [Deployment](#deployment)); no infrastructure this project
+  doesn't need yet.
+
+Full detail: [Architecture](#architecture).
+
+**How to run it** — `docker compose up --build`, then seed demo data.
+Full steps: [Quick Start](#quick-start).
+
+**How I tested it** — 243 backend tests passing, 87% coverage (real
+numbers from this session's run), plus a real Locust load test. Just as
+important: three real bugs in this project were caught only by manually
+running the live stack, not by pytest — see [Testing](#testing) and
+[Performance](#performance) for both the numbers and that story.
+
+**What I learned**
+- A green test suite doesn't prove background-thread code is correct — a
+  real bug in the playbook engine (an unguarded `request.remote_addr`
+  call) only broke on a real background thread; pytest's request-context
+  fixture silently masked it. The fix was a runtime guard *and* a
+  regression test that reproduces the bug from a real thread on purpose.
+
 ## Contents
 
+- [At a glance](#at-a-glance)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
@@ -190,7 +269,7 @@ your machine.
 **Also available once the stack is up:**
 - Backend API directly: http://localhost:5000 (e.g. `GET /api/health`)
 - Prometheus: http://localhost:9090
-- Grafana: http://localhost:3000
+- Grafana: http://localhost:3000   (default login: username:admin password:admin)
 
 **If something doesn't come up:** run `docker compose ps` to check
 container status, or `docker compose logs backend` (swap in `frontend`,
