@@ -1,10 +1,129 @@
-# SIEM-lite
+# SIEM-HUB
 
-A minimal Log Analyzer / SIEM built with Flask + React. Ingests logs,
-normalises them into a common Event schema, runs rule-based + statistical +
-ML anomaly detection, and visualizes alerts/trends on a dashboard. See
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full pipeline and the
-`Log` → `Event` migration rationale.
+[![Security](https://github.com/Babilalewis20004/SIEM-HUB/actions/workflows/security.yml/badge.svg)](https://github.com/Babilalewis20004/SIEM-HUB/actions/workflows/security.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](backend/requirements.txt)
+[![React 18](https://img.shields.io/badge/react-18-61dafb.svg)](frontend/package.json)
+
+A real-time Security Information & Event Management platform — log
+ingestion, rule-based + ML anomaly detection, MITRE ATT&CK/IOC enrichment,
+incident correlation, and human-approved automated response — built with
+Flask + React from the ground up as a full SOC workflow, not a log viewer.
+Every claim below (test counts, load-test numbers, the screenshots) is a
+real, captured artifact from a live run of this exact codebase, not a
+description of intended behavior.
+
+## Screenshots
+
+| Dashboard | Alerts (MITRE + IOC enrichment) |
+|---|---|
+| ![Dashboard](docs/screenshots/01-dashboard.png) | ![Alerts](docs/screenshots/02-alerts.png) |
+
+| Incident detail | Approval-gated response |
+|---|---|
+| ![Incident detail](docs/screenshots/04-incident-detail.png) | ![Approvals](docs/screenshots/08-approvals.png) |
+
+More: [Incidents](docs/screenshots/03-incidents.png) ·
+[Threat Intel](docs/screenshots/05-threat-intel.png) ·
+[Log Explorer](docs/screenshots/06-log-explorer.png) ·
+[Playbooks](docs/screenshots/07-playbooks.png)
+
+## Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Example detection scenarios](#example-detection-scenarios)
+- [Testing](#testing)
+- [Performance](#performance)
+- [Security](#security)
+- [Deployment](#deployment)
+- [Structure](#structure)
+- [Auth](#auth)
+- [Running with Docker](#running-with-docker)
+- [How detection works](#how-detection-works)
+- [ML anomaly detection](#ml-anomaly-detection-isolation-forest)
+- [Ingesting logs](#ingesting-logs)
+- [Tech stack](#tech-stack)
+
+## Features
+
+- **Detection, two independent engines** — configurable threshold rules
+  (e.g. 5+ failed logins from one IP in 60s) *and* an Isolation Forest ML
+  model that flags anomalous traffic shapes no rule was ever written for,
+  running side by side on every ingested event.
+- **Real-time SOC operations** — WebSocket push (Flask-SocketIO) streams
+  new alerts, incident updates, and playbook progress to every connected
+  analyst live, with a synchronous in-process event bus decoupling
+  detection from broadcast.
+- **MITRE ATT&CK + threat intel enrichment** — alerts are auto-tagged with
+  ATT&CK techniques, matched against an IOC table (IP/domain/URL/hash),
+  and given a blended risk score — never a black box, every score and
+  correlation decision is stored with its own reasoning.
+- **Deterministic alert correlation → incidents** — a scored engine (same
+  source IP/host/user/category/IOC, time-window proximity) groups related
+  alerts into one Incident with a full investigation state machine, instead
+  of flooding analysts with duplicate noise.
+- **Playbook automation with human-gated approval** — declarative
+  playbooks run registered, validated actions automatically; anything
+  high/critical risk always parks for approval, with separation-of-duties
+  enforced server-side (you can never approve your own request).
+- **RBAC** — admin/analyst/viewer roles enforced through one central
+  permission registry on every route, not scattered `if role ==` checks.
+- **Observability** — structured JSON logging, liveness/readiness health
+  endpoints, and Prometheus metrics, wired into a Grafana dashboard out of
+  the box.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Client
+        Browser["Browser (React SPA)"]
+    end
+
+    subgraph Edge
+        Nginx["nginx\n(TLS-ready, security headers,\nreverse proxy + WS upgrade)"]
+    end
+
+    subgraph App["Flask app (single process)"]
+        API["REST API\n(auth, logs, alerts, incidents,\nrules, IOCs, playbooks)"]
+        WS["Socket.IO"]
+        Bus["Event bus\n(in-process pub/sub)"]
+        Sched["APScheduler\n(detection, ML retrain)"]
+        Detect["Detection\n(rules + Isolation Forest)"]
+        Enrich["Enrichment\n(MITRE + IOC + risk scoring)"]
+        Corr["Correlation → Incident"]
+        Play["Playbook engine\n(approval-gated actions)"]
+    end
+
+    subgraph Data
+        DB[("SQLite / Postgres")]
+    end
+
+    subgraph Obs["Observability"]
+        Prom["Prometheus"]
+        Graf["Grafana"]
+    end
+
+    Browser <-->|HTTPS| Nginx
+    Nginx <-->|/api| API
+    Nginx <-->|/socket.io, WS upgrade| WS
+    API --> DB
+    Sched --> Detect
+    API -->|ingest| Detect
+    Detect --> Enrich --> Corr --> DB
+    Corr --> Bus
+    Play --> Bus
+    Bus --> WS
+    API -->|/api/metrics| Prom --> Graf
+```
+
+Full pipeline detail (the normalised `Event` schema, parser architecture,
+RBAC internals, the correlation scoring model, the playbook engine's
+approval/idempotency design, and every documented trade-off) is in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the above is the
+map, that's the territory.
 
 ## Quick Start
 
@@ -38,7 +157,7 @@ your machine.
    docker compose up --build
    ```
    This runs in the foreground and streams logs from every service. Leave
-   it running and open a **second terminal** in the same `SIEM-APP` folder
+   it running and open a **second terminal** in the same `SIEM-HUB` folder
    for the next step. (Prefer one terminal? Run `docker compose up --build -d`
    instead to start in the background, then use `docker compose logs -f` if
    you want to watch the logs.)
@@ -84,69 +203,126 @@ See [Running with Docker](#running-with-docker) below for more detail on
 what the stack is doing, and the rest of this README for how the
 application itself works.
 
+## Example detection scenarios
+
+Three real, executed walkthroughs — actual `curl` requests and their real
+JSON responses against a live seeded stack, not hypothetical examples —
+live in [`docs/SCENARIOS.md`](docs/SCENARIOS.md):
+
+1. **SSH brute force** — raw log lines in → threshold rule fires → MITRE
+   T1110 tagged → correlated into an Incident → an automated playbook
+   tags/notes/notifies with no human step needed.
+2. **ML catches what no rule was written for** — the same traffic flagged
+   by the Isolation Forest model *before* it was even large enough to trip
+   the threshold rule, because the shape of the traffic was already
+   off-baseline.
+3. **IOC match → human-approved response** — a known-malicious IP triggers
+   an investigation playbook; its low-risk steps run automatically, its
+   `block_ip` step parks for approval (separation-of-duties enforced —
+   the triggering user can't self-approve), an admin approves it, and the
+   (mocked) block executes.
+
+## Testing
+
+```
+243 passed in 140.62s   ·   87% line coverage (backend)
+```
+
+Real output from this session's run of the full backend suite (models,
+parsing, detection, RBAC, correlation, playbooks, refresh-token rotation,
+audit logging). No automated frontend test suite exists yet — an honest,
+current gap, not hidden. Full breakdown, what's covered where coverage is
+lower, and why some bugs were only ever caught by running the live stack
+rather than pytest: [`docs/TESTING.md`](docs/TESTING.md).
+
+## Performance
+
+```
+20 concurrent users, 60s, shared session:  776 requests, 0 failures
+Aggregate:  13.2 req/s   ·   p50 98ms   ·   p95 910ms   ·   p99 1300ms
+```
+
+Real Locust run against the actual `docker compose` stack on one dev
+laptop (SQLite, single Flask process) — not a production capacity claim,
+a demonstration the detection→correlation→API pipeline holds up under
+concurrent load. Also documented: what happened when 20 users each tried
+to log in independently (the login rate limiter correctly rejected most of
+them — a real, useful finding, not a bug). Methodology, full numbers, and
+where these would move first in production:
+[`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
+
+## Security
+
+JWT access tokens (15-minute expiry) backed by a rotating, single-use,
+HttpOnly-cookie refresh session with reuse detection; RBAC enforced through
+one central permission registry; per-IP rate limiting on auth/upload
+routes; a playbook engine with no dynamic code execution and a server-side
+approval floor on high-risk actions; CSP/security headers and Host
+allow-listing at the edge. Every push/PR runs 8 blocking CI gates —
+gitleaks, bandit, pip-audit, npm audit, CodeQL, Semgrep, Trivy, and OWASP
+ZAP DAST. Full writeup, the RBAC permission matrix, and the documented,
+deliberate trade-offs (SQLite single-writer, threading async mode, mock
+response providers): [`docs/SECURITY.md`](docs/SECURITY.md).
+
+## Deployment
+
+The Quick Start above is tuned for trying the app locally. Running it for
+real changes several things — Postgres instead of SQLite, gunicorn+eventlet
+instead of the dev server, real TLS termination, Redis-backed rate
+limiting/WebSocket fan-out if you scale past one worker — each documented
+with exactly what to change, plus a generic cloud-VM walkthrough that works
+on any VPS: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
 ## Structure
 
 ```
-siem-lite/
+SIEM-HUB/
 ├── backend/          Flask API
 │   ├── app/
-│   │   ├── models/       Event (canonical), Log (deprecated alias), Alert, Rule, User
-│   │   ├── parsers/       base.py + ssh.py, nginx.py — format-specific extraction
-│   │   ├── routes/       auth, logs, alerts, stats, rules blueprints
-│   │   ├── services/
-│   │   │   ├── normalization.py   parser output -> normalised Event fields
-│   │   │   ├── validation.py      Event field validation before storage
-│   │   │   ├── detection.py       rule-based + off-hours heuristic
-│   │   │   └── ml_detection.py    Isolation Forest anomaly detection
+│   │   ├── models/       Event (canonical), Log (deprecated alias), Alert, Rule, User, Incident, MITRE, IOC, Playbook
+│   │   ├── parsers/      base.py + ssh, nginx, apache, firewall, windows_security, syslog — format-specific extraction
+│   │   ├── routes/       auth, logs, alerts, stats, rules, incidents, iocs, mitre, playbooks, users, audit, health
+│   │   ├── services/     normalization, validation, detection, ml_detection, correlation, enrichment, risk_scoring
+│   │   ├── playbooks/    engine, registry, validators, providers (action automation)
+│   │   ├── events/       in-process pub/sub bus + Socket.IO broadcaster
+│   │   ├── ws/           WebSocket auth + handlers
 │   │   └── ml_models/    persisted trained model (isolation_forest.joblib)
 │   ├── migrations/    Flask-Migrate/Alembic schema history
-│   ├── tests/          pytest suite (models, normalisation, ingestion, detection, ML, API)
-│   ├── config.py
-│   ├── run.py
-│   ├── seed.py        Seeds a default admin user + default rules + sample events
-│   └── requirements.txt
-└── frontend/          React (Vite)
-    └── src/
-        ├── api/client.js     Axios wrapper for the backend (attaches JWT, handles 401s)
-        ├── context/          AuthContext.jsx — login/register/logout state
-        ├── pages/            Login, Dashboard, Alerts, Logs (Log Explorer + event detail)
-        └── components/
+│   ├── tests/          pytest suite + tests/load/ (Locust, standalone)
+│   ├── config.py / run.py / seed.py / requirements.txt
+├── frontend/          React (Vite)
+│   └── src/
+│       ├── api/client.js     Axios wrapper (JWT, silent refresh-and-retry on 401)
+│       ├── context/          Auth, Permission, Realtime contexts
+│       ├── services/websocket.js
+│       ├── pages/            Dashboard, Alerts, Logs, Incidents, IOCs, Playbooks, Approvals, Users
+│       └── components/
+├── scripts/screenshots/  Playwright script regenerating docs/screenshots/
+├── observability/     Prometheus + Grafana config
+└── docs/              ARCHITECTURE, SECURITY, DEPLOYMENT, TESTING, PERFORMANCE, SCENARIOS
 ```
 
 ## Auth
 
-JWT-based, implemented in `app/utils/auth.py` + `app/routes/auth.py`.
+JWT access tokens (`app/utils/auth.py` + `app/routes/auth.py`), backed by
+a rotating HttpOnly-cookie refresh session — full design in
+[`docs/SECURITY.md`](docs/SECURITY.md). Quick reference:
 
-- `POST /api/auth/register` — `{"email": "...", "password": "..."}` (min 8
-  chars). The **first** user to register becomes `role: "admin"`, everyone
-  after is `role: "viewer"` (least privilege) — an admin promotes trusted
-  accounts to `analyst`/`admin` via `PATCH /api/users/<id>/role`. Role is
-  enforced everywhere via a central permission registry
-  (`app/auth/permissions.py`) — see `docs/ARCHITECTURE.md`'s RBAC section.
-- `POST /api/auth/login` — returns `{"token": "...", "user": {...}}`
-- `GET /api/auth/me` — returns the current user for a valid token
-- Every other route (`/api/logs/*`, `/api/alerts/*`, `/api/stats/*`,
-  `/api/rules/*`, etc.) requires `Authorization: Bearer <token>` — enforced
-  via `before_request` on each blueprint in `app/__init__.py`, with
-  per-route RBAC permission checks on top
-- Tokens expire after `JWT_EXPIRATION_HOURS` (default 12) — no refresh-token
-  flow; the frontend just sends the person back to the login screen on a 401
-- Set `REQUIRE_AUTH=false` in `.env` to disable auth entirely for local
-  testing (e.g. hitting the API directly with curl without a token)
-- `/api/auth/login`, `/api/auth/register`, and `/api/logs/upload` are
-  rate-limited per-IP (Flask-Limiter — see `RATELIMIT_*` in `config.py`; a
-  429 with `{"error": "rate_limit_exceeded"}` means back off). Storage is
-  in-memory, so it's single-process only; set `RATELIMIT_ENABLED=false` to
-  disable for local testing.
+- `POST /api/auth/register` — first user becomes `admin`, everyone after
+  starts as `viewer`; an admin promotes via `PATCH /api/users/<id>/role`.
+- `POST /api/auth/login` — returns `{"token": "...", "user": {...}}` plus
+  an HttpOnly refresh cookie.
+- `POST /api/auth/refresh` / `POST /api/auth/logout` — rotate / revoke.
+- `GET /api/auth/me` — current user for a valid token.
+- Every other route requires `Authorization: Bearer <token>` plus a
+  per-route RBAC permission check (`app/auth/permissions.py`).
+- `REQUIRE_AUTH=false` disables auth entirely for local curl testing.
+- `/api/auth/login`, `/api/auth/register`, `/api/auth/refresh`, and
+  `/api/logs/upload` are per-IP rate-limited (Flask-Limiter).
 
-`seed.py` creates a default account: **admin@example.com / changeme123** —
-log in with that, then change the password or delete the account and
-register your own. Don't ship this default in anything real.
-
-The frontend (`AuthContext.jsx`) stores the token in `localStorage`, attaches
-it to every API call via an axios interceptor, and redirects to `/login`
-(really: renders the `Login` page in place) whenever a request comes back
-401.
+`seed.py` creates **admin@example.com / changeme123** — log in, then
+change the password or delete the account and register your own. Don't
+ship this default in anything real.
 
 ## Running with Docker
 
@@ -181,13 +357,14 @@ Detection runs automatically every 30s via APScheduler (configurable in
 ### Running tests
 
 Tests run against a local Python environment, not the Docker image (there's
-no test stage in `backend/Dockerfile`):
+no test stage in `backend/Dockerfile`) — see [Testing](#testing) and
+[`docs/TESTING.md`](docs/TESTING.md) for real results:
 
 ```bash
 cd backend
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-pytest
+pytest --cov=app --cov-report=term-missing
 ```
 
 ## How detection works
@@ -217,6 +394,8 @@ records only (`source_ip`, `event_type`, `category`, `outcome`,
 
 Complements the rule-based engine by catching *unknown* unusual patterns
 instead of only known-bad ones. Lives in `app/services/ml_detection.py`.
+See [Example detection scenarios](#example-detection-scenarios) for a real
+captured example of it flagging traffic before the corresponding rule did.
 
 **Pipeline:**
 1. Logs are bucketed by `(source_ip, 60s window)` — configurable via
@@ -285,3 +464,19 @@ instead of only known-bad ones. Lives in `app/services/ml_detection.py`.
   set into per-value counts (with max severity and last-seen) — any field
   `GET /api/logs` can filter by. The Log Explorer's "Group by" view uses
   this; clicking a group row drills back into the raw filtered list.
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Backend | Flask 3.1, SQLAlchemy, Flask-Migrate (Alembic), Flask-SocketIO, Flask-Limiter, PyJWT |
+| Detection | scikit-learn (Isolation Forest), rule-based threshold engine |
+| Database | SQLite (dev/demo) → Postgres (production, see [DEPLOYMENT.md](docs/DEPLOYMENT.md)) |
+| Frontend | React 18, Vite, react-router-dom, @tanstack/react-query, Recharts, socket.io-client |
+| Observability | Prometheus, Grafana, structured JSON logging |
+| CI/Security | GitHub Actions — gitleaks, bandit, pip-audit, npm audit, CodeQL, Semgrep, Trivy, OWASP ZAP |
+| Containerization | Docker, Docker Compose, nginx (SPA + reverse proxy) |
+
+## License
+
+[MIT](LICENSE)

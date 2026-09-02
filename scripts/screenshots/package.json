@@ -1,0 +1,13 @@
+{
+  "name": "siem-hub-screenshots",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Regenerates docs/screenshots/*.png from a running docker-compose stack. Not part of the app build.",
+  "type": "module",
+  "scripts": {
+    "capture": "node capture.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}

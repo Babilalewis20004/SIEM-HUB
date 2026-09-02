@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 backend/venv/
 backend/instance/
+backend/.coverage
 
 # Secrets
 backend/.env
@@ -16,6 +17,10 @@ backend/app/ml_models/*.joblib
 # Node / frontend
 frontend/node_modules/
 frontend/dist/
+scripts/screenshots/node_modules/
+
+# Load test output (backend/tests/load/locustfile.py) -- see docs/PERFORMANCE.md
+backend/tests/load/*.csv
 
 # OS
 .DS_Store
