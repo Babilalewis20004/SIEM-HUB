@@ -1,5 +1,4 @@
 from app.models.event import Event
-from app.models.log import Log  # deprecated alias for Event
 from app.models.rule import Rule
 from app.models.alert import Alert
 from app.models.user import User
@@ -11,7 +10,7 @@ from app.models.ioc import IOC, IOCMatch, ThreatIntelSource
 from app.playbooks.models import Playbook, PlaybookExecution, PlaybookApproval, PlaybookActionLog
 
 __all__ = [
-    "Event", "Log", "Alert", "Rule", "User", "RefreshToken", "Incident", "IncidentNote", "AuditLog",
+    "Event", "Alert", "Rule", "User", "RefreshToken", "Incident", "IncidentNote", "AuditLog",
     "MitreTechnique", "IOC", "IOCMatch", "ThreatIntelSource",
     "Playbook", "PlaybookExecution", "PlaybookApproval", "PlaybookActionLog",
 ]

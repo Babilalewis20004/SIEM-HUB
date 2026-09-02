@@ -105,10 +105,6 @@ def summary():
         detection_state = "healthy"
 
     return jsonify({
-        # deprecated aliases kept for the pre-Event dashboard
-        "total_logs": total_events,
-        "log_severity_counts": severity_counts,
-
         "total_events": total_events,
         "open_alerts": open_alerts,
         "events_by_severity": severity_counts,

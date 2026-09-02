@@ -69,18 +69,6 @@ def test_event_requires_raw_message(app, db):
             db.session.commit()
 
 
-def test_event_to_dict_has_legacy_aliases(app, db):
-    with app.app_context():
-        event = _make_event()
-        db.session.add(event)
-        db.session.commit()
-
-        d = event.to_dict()
-        assert d["source"] == d["source_type"]
-        assert d["host"] == d["hostname"]
-        assert "ingested_at" in d
-
-
 def test_event_to_dict_source_geo(app, db):
     with app.app_context():
         public_event = _make_event(source_ip="8.8.8.8")
@@ -94,7 +82,7 @@ def test_event_to_dict_source_geo(app, db):
         assert private_event.to_dict()["source_geo"] is None
 
 
-def test_alert_event_id_and_log_id_alias(app, db):
+def test_alert_event_id_and_to_dict(app, db):
     with app.app_context():
         event = _make_event()
         db.session.add(event)
@@ -109,8 +97,6 @@ def test_alert_event_id_and_log_id_alias(app, db):
         db.session.add(alert)
         db.session.commit()
 
-        assert alert.log_id == event.id  # deprecated alias property
         d = alert.to_dict()
         assert d["event_id"] == event.id
-        assert d["log_id"] == event.id
         assert d["event"]["id"] == event.id

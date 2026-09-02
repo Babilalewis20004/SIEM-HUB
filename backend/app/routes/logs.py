@@ -10,6 +10,7 @@ from app.services.normalization import normalize_line
 from app.services.validation import validate_event_data, EventValidationError
 from app.auth.authorization import require_permission
 from app.auth.permissions import EVENTS_READ, LOGS_UPLOAD
+from app.utils.pagination import get_pagination_params, paginate
 
 logs_bp = Blueprint("logs", __name__)
 
@@ -166,20 +167,10 @@ def list_logs():
     sort_col = _SEVERITY_RANK if sort_by == "severity" else getattr(Event, sort_by)
     q = q.order_by(sort_col.asc() if order == "asc" else sort_col.desc())
 
-    page = max(int(request.args.get("page", 1)), 1)
-    per_page = min(max(int(request.args.get("per_page", 50)), 1), 200)
-
-    total = q.count()
-    items = q.offset((page - 1) * per_page).limit(per_page).all()
-
-    return jsonify({
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "sort": sort_by,
-        "order": order,
-        "items": [event.to_dict() for event in items],
-    })
+    result = paginate(q, lambda event: event.to_dict())
+    result["sort"] = sort_by
+    result["order"] = order
+    return jsonify(result)
 
 
 @logs_bp.route("/grouped", methods=["GET"])
@@ -215,8 +206,7 @@ def grouped_logs():
         .all()
     )
 
-    page = max(int(request.args.get("page", 1)), 1)
-    per_page = min(max(int(request.args.get("per_page", 50)), 1), 200)
+    page, per_page = get_pagination_params()
     total = len(rows)
     page_rows = rows[(page - 1) * per_page: (page - 1) * per_page + per_page]
 

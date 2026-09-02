@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify
 from app.models import AuditLog
 from app.auth.authorization import require_permission
 from app.auth.permissions import AUDIT_READ
+from app.utils.pagination import paginate
 
 audit_bp = Blueprint("audit", __name__)
 
@@ -25,14 +26,4 @@ def list_audit_log():
 
     q = q.order_by(AuditLog.created_at.desc())
 
-    page = max(int(request.args.get("page", 1)), 1)
-    per_page = min(max(int(request.args.get("per_page", 50)), 1), 200)
-    total = q.count()
-    items = q.offset((page - 1) * per_page).limit(per_page).all()
-
-    return jsonify({
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "items": [a.to_dict() for a in items],
-    })
+    return jsonify(paginate(q, lambda a: a.to_dict()))

@@ -4,6 +4,8 @@ import {
   getIOCs, createIOC, deleteIOC, enableIOC, disableIOC, importIOCs,
 } from "../api/client";
 import { usePermissions } from "../context/PermissionContext.jsx";
+import Loading from "../components/Loading.jsx";
+import ApiError from "../components/ApiError.jsx";
 
 const INDICATOR_TYPES = ["ip", "domain", "url", "md5", "sha1", "sha256"];
 const THREAT_LEVELS = ["unknown", "low", "medium", "high", "critical"];
@@ -59,9 +61,7 @@ function CreateIOCForm({ onCreated }) {
       >
         {mutation.isPending ? "Adding…" : "Add IOC"}
       </button>
-      {mutation.isError && (
-        <p className="auth-error">{mutation.error?.response?.data?.error}</p>
-      )}
+      <ApiError mutations={mutation} />
     </div>
   );
 }
@@ -165,7 +165,7 @@ export default function IOCs() {
       </div>
 
       {isLoading ? (
-        <p>Loading…</p>
+        <Loading />
       ) : (
         <table className="data-table">
           <thead>
@@ -210,9 +210,7 @@ export default function IOCs() {
           </tbody>
         </table>
       )}
-      {deleteMutation.isError && (
-        <p className="auth-error">{deleteMutation.error?.response?.data?.error}</p>
-      )}
+      <ApiError mutations={deleteMutation} />
     </div>
   );
 }

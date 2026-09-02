@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getLogs, getGroupedLogs, getLog, uploadLogs } from "../api/client";
 import { usePermissions } from "../context/PermissionContext.jsx";
+import Loading from "../components/Loading.jsx";
 
 const SEVERITY_COLORS = {
   info: "#4f8cff",
@@ -309,7 +310,7 @@ export default function Logs() {
 
       {groupBy ? (
         groupedLoading ? (
-          <p>Loading…</p>
+          <Loading />
         ) : (
           <>
             <p className="field-caption">
@@ -324,7 +325,7 @@ export default function Logs() {
           </>
         )
       ) : isLoading ? (
-        <p>Loading…</p>
+        <Loading />
       ) : (
         <table className="data-table">
           <thead>

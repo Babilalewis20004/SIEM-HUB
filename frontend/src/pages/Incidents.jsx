@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { getIncidents } from "../api/client";
 import { useRealtime } from "../hooks/useRealtime.js";
+import Loading from "../components/Loading.jsx";
 
 const SEVERITY_COLORS = { info: "#4f8cff", low: "#4f8cff", medium: "#f5a623", high: "#e6493d", critical: "#e6493d" };
 const STATUSES = ["", "open", "investigating", "contained", "resolved", "closed"];
@@ -48,7 +49,7 @@ export default function Incidents() {
       </div>
 
       {isLoading ? (
-        <p>Loading…</p>
+        <Loading />
       ) : (
         <table className="data-table">
           <thead>

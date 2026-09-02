@@ -5,6 +5,7 @@ import { getAlerts, updateAlert, runDetection, getMlStatus, trainModel } from ".
 import { usePermissions } from "../context/PermissionContext.jsx";
 import { useRealtime } from "../hooks/useRealtime.js";
 import EnrichmentPanel from "../components/EnrichmentPanel.jsx";
+import Loading from "../components/Loading.jsx";
 
 const SEVERITY_COLORS = { info: "#4f8cff", warning: "#f5a623", critical: "#e6493d" };
 
@@ -105,7 +106,7 @@ export default function Alerts() {
       </div>
 
       {isLoading ? (
-        <p>Loading…</p>
+        <Loading />
       ) : (
         <table className="data-table">
           <thead>

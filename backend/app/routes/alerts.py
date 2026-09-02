@@ -12,6 +12,7 @@ from app.auth.authorization import require_permission
 from app.auth.permissions import (
     ALERTS_READ, ALERTS_ACKNOWLEDGE, ALERTS_RESOLVE, ML_TRAIN, DETECTION_RUN, role_has_permission,
 )
+from app.utils.pagination import paginate
 
 alerts_bp = Blueprint("alerts", __name__)
 
@@ -31,17 +32,7 @@ def list_alerts():
 
     q = q.order_by(Alert.created_at.desc())
 
-    page = int(request.args.get("page", 1))
-    per_page = min(int(request.args.get("per_page", 50)), 200)
-    total = q.count()
-    items = q.offset((page - 1) * per_page).limit(per_page).all()
-
-    return jsonify({
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "items": [a.to_dict() for a in items],
-    })
+    return jsonify(paginate(q, lambda a: a.to_dict()))
 
 
 @alerts_bp.route("/<alert_id>", methods=["PATCH"])

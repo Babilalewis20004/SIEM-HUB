@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getUsers, updateUserRole, updateUserStatus } from "../api/client";
 import { useAuth } from "../context/AuthContext.jsx";
+import Loading from "../components/Loading.jsx";
+import ApiError from "../components/ApiError.jsx";
 
 const ROLES = ["admin", "analyst", "viewer"];
 
@@ -26,7 +28,7 @@ export default function Users() {
       <h2>Users</h2>
 
       {isLoading ? (
-        <p>Loading…</p>
+        <Loading />
       ) : (
         <table className="data-table">
           <thead>
@@ -70,11 +72,7 @@ export default function Users() {
         </table>
       )}
 
-      {(roleMutation.isError || statusMutation.isError) && (
-        <p className="auth-error">
-          {roleMutation.error?.response?.data?.error || statusMutation.error?.response?.data?.error}
-        </p>
-      )}
+      <ApiError mutations={[roleMutation, statusMutation]} />
     </div>
   );
 }

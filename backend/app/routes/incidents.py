@@ -11,6 +11,7 @@ from app.auth.authorization import require_permission
 from app.auth.permissions import (
     INCIDENTS_READ, INCIDENTS_UPDATE, INCIDENTS_ASSIGN, INCIDENTS_RESOLVE, role_has_permission,
 )
+from app.utils.pagination import paginate
 
 incidents_bp = Blueprint("incidents", __name__)
 
@@ -59,17 +60,7 @@ def list_incidents():
 
     q = q.order_by(Incident.last_seen_at.desc().nullslast(), Incident.created_at.desc())
 
-    page = max(int(request.args.get("page", 1)), 1)
-    per_page = min(max(int(request.args.get("per_page", 50)), 1), 200)
-    total = q.count()
-    items = q.offset((page - 1) * per_page).limit(per_page).all()
-
-    return jsonify({
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "items": [i.to_dict(include_alerts=False) for i in items],
-    })
+    return jsonify(paginate(q, lambda i: i.to_dict(include_alerts=False)))
 
 
 @incidents_bp.route("/<incident_id>", methods=["GET"])

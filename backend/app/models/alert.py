@@ -51,11 +51,6 @@ class Alert(db.Model):
     )
     ioc_matches = db.relationship("IOCMatch", backref="alert", lazy=True)
 
-    @property
-    def log_id(self):
-        """Deprecated alias for event_id."""
-        return self.event_id
-
     def to_dict(self, include_risk=True):
         from app.services.risk_scoring import compute_overall_risk
 
@@ -63,7 +58,6 @@ class Alert(db.Model):
         return {
             "id": self.id,
             "event_id": self.event_id,
-            "log_id": self.event_id,  # deprecated alias
             "rule_name": self.rule_name,
             "rule_id": self.rule_id,
             "title": self.title or self.rule_name,

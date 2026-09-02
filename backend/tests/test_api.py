@@ -53,7 +53,6 @@ def test_stats_summary_reflects_events(client, db, auth_headers):
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["total_events"] == 2
-    assert body["total_logs"] == 2  # deprecated alias stays in sync
     assert body["events_by_category"]["authentication"] == 1
     assert body["events_by_category"]["web"] == 1
 
@@ -211,5 +210,4 @@ def test_get_single_log_event(client, db, auth_headers):
     body = resp.get_json()
     assert body["id"] == event.id
     assert body["event_type"] == "authentication_failure"
-    # legacy aliases still present for older frontend code
-    assert body["source"] == "ssh"
+    assert body["source_type"] == "ssh"

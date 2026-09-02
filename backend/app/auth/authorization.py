@@ -26,19 +26,3 @@ def require_permission(*permissions):
             return f(*args, **kwargs)
         return wrapper
     return decorator
-
-
-def require_roles(*roles):
-    """Rarely needed alongside permission-based checks, but kept for routes
-    keyed directly to a role rather than a specific permission."""
-    def decorator(f):
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            user = getattr(g, "current_user", None)
-            if user is None:
-                return jsonify({"error": "Authentication required."}), 401
-            if user.role not in roles:
-                return jsonify({"error": "Forbidden: insufficient permissions."}), 403
-            return f(*args, **kwargs)
-        return wrapper
-    return decorator

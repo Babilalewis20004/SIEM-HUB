@@ -10,6 +10,7 @@ from app.services.ioc_normalization import validate_indicator, sanitize_text
 from app.services.audit import log_action
 from app.auth.authorization import require_permission
 from app.auth.permissions import IOCS_READ, IOCS_MANAGE
+from app.utils.pagination import paginate
 
 iocs_bp = Blueprint("iocs", __name__)
 
@@ -58,17 +59,7 @@ def list_iocs():
 
     q = q.order_by(IOC.created_at.desc())
 
-    page = max(int(request.args.get("page", 1)), 1)
-    per_page = min(max(int(request.args.get("per_page", 50)), 1), 200)
-    total = q.count()
-    items = q.offset((page - 1) * per_page).limit(per_page).all()
-
-    return jsonify({
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "items": [i.to_dict() for i in items],
-    })
+    return jsonify(paginate(q, lambda i: i.to_dict()))
 
 
 @iocs_bp.route("/<ioc_id>", methods=["GET"])

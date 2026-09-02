@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getPlaybooks, createPlaybook, deletePlaybook, executePlaybook } from "../api/client";
 import { usePermissions } from "../context/PermissionContext.jsx";
+import Loading from "../components/Loading.jsx";
+import ApiError from "../components/ApiError.jsx";
 
 const TEMPLATE = JSON.stringify({
   name: "My Playbook",
@@ -48,14 +50,7 @@ function CreatePlaybookForm({ onCreated }) {
         {mutation.isPending ? "Creating…" : "Create Playbook"}
       </button>
       {parseError && <p className="auth-error">{parseError}</p>}
-      {mutation.isError && (
-        <p className="auth-error">
-          {mutation.error?.response?.data?.error}
-          {mutation.error?.response?.data?.details?.length > 0 && (
-            <ul>{mutation.error.response.data.details.map((d) => <li key={d}>{d}</li>)}</ul>
-          )}
-        </p>
-      )}
+      <ApiError mutations={mutation} />
     </div>
   );
 }
@@ -94,7 +89,7 @@ export default function Playbooks() {
       )}
 
       {isLoading ? (
-        <p>Loading…</p>
+        <Loading />
       ) : (
         <table className="data-table">
           <thead>
@@ -134,9 +129,7 @@ export default function Playbooks() {
           </tbody>
         </table>
       )}
-      {deleteMutation.isError && (
-        <p className="auth-error">{deleteMutation.error?.response?.data?.error}</p>
-      )}
+      <ApiError mutations={deleteMutation} />
     </div>
   );
 }

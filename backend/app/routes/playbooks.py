@@ -25,6 +25,7 @@ from app.auth.authorization import require_permission
 from app.auth.permissions import (
     PLAYBOOKS_READ, PLAYBOOKS_MANAGE, PLAYBOOKS_EXECUTE, PLAYBOOKS_APPROVE,
 )
+from app.utils.pagination import paginate
 
 playbooks_bp = Blueprint("playbooks", __name__)
 playbook_executions_bp = Blueprint("playbook_executions", __name__)
@@ -165,15 +166,8 @@ def list_executions():
             q = q.filter(column == value)
 
     q = q.order_by(PlaybookExecution.started_at.desc())
-    page = max(int(request.args.get("page", 1)), 1)
-    per_page = min(max(int(request.args.get("per_page", 50)), 1), 200)
-    total = q.count()
-    items = q.offset((page - 1) * per_page).limit(per_page).all()
 
-    return jsonify({
-        "total": total, "page": page, "per_page": per_page,
-        "items": [e.to_dict(include_logs=False) for e in items],
-    })
+    return jsonify(paginate(q, lambda e: e.to_dict(include_logs=False)))
 
 
 @playbook_executions_bp.route("/<execution_id>", methods=["GET"])

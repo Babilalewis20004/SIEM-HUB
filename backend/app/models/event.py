@@ -76,8 +76,4 @@ class Event(db.Model):
             "parsed_fields": self.parsed_fields or {},
             "source_id": self.source_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            # --- deprecated aliases kept for the pre-Event frontend/API shape ---
-            "source": self.source_type,
-            "host": self.hostname,
-            "ingested_at": self.created_at.isoformat() if self.created_at else None,
         }
