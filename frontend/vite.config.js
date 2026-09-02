@@ -12,8 +12,18 @@ const securityHeaders = {
   "Content-Security-Policy":
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data:; font-src 'self'; connect-src 'self' ws: wss:; " +
-    "object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+    // form-action, like base-uri, doesn't fall back to default-src per the
+    // CSP spec -- 'self' here is the only <form> target this SPA ever uses
+    // (the login/register forms POST via axios, not a real form submit, but
+    // nothing needs a cross-origin form action either way).
+    "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
   "Permissions-Policy": "geolocation=(), camera=(), microphone=()",
+  // Nothing here is ever embedded cross-origin (frame-ancestors above already
+  // forbids being framed at all) and nothing it loads is cross-origin either
+  // (every src directive above is 'self'/data: only) -- safe to fully opt in
+  // to cross-origin isolation instead of leaving it unset.
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "require-corp",
 };
 
 export default defineConfig({

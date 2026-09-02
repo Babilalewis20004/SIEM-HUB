@@ -12,3 +12,20 @@
 # just under the opposite alert name. Neither route serves sensitive data,
 # so this is an unavoidable informational finding, not an actionable one.
 10049	IGNORE	Always fires (Non-Storable or Storable-and-Cacheable) regardless of Cache-Control; informational, not actionable
+#
+# 10027 (Information Disclosure - Suspicious Comments): fires once on the
+# built frontend/dist/assets/index-*.js bundle. Verified by fetching the
+# exact bundle and searching it: there is no real developer comment or
+# secret in it -- the rule's keyword match is hitting legitimate, necessary
+# strings from bundled library/app code, e.g. the login form's
+# type="password" field and axios/socket.io token-handling variable names
+# ("token", "password" appear dozens of times as identifiers, never as a
+# literal credential). A minified bundle for an auth-based app will always
+# contain these words; not fixable by editing the code.
+10027	IGNORE	Only matches legitimate password/token identifiers in bundled library+app code, not a real comment or secret
+#
+# 10109 (Modern Web Application): purely a detection notice ("this looks
+# like an SPA built with a client-side framework, consider ZAP's AJAX spider
+# for better coverage") -- not a vulnerability, and unavoidable for any
+# React/Vue/Angular app.
+10109	IGNORE	Informational SPA-detection notice, not a vulnerability
